@@ -25,6 +25,7 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   String _recognizedPlace = "Scanning...";
   double _confidence = 0.0;
   bool _isProcessing = false;
+  Timer? _processingTimer;
   
   @override
   void initState() {
@@ -35,25 +36,28 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   }
   
   Future<void> _initializeCamera() async {
+    // Create the controller (flashMode isn't a constructor parameter)
     _cameraController = CameraController(
       widget.camera,
       ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      imageFormatGroup: ImageFormatGroup.jpeg
     );
     
     await _cameraController.initialize();
     
-    // Turn off the flash
-    if (_cameraController.value.flashMode == FlashMode.torch ||
-        _cameraController.value.flashMode == FlashMode.always) {
+    // Set flash mode after initialization
+    try {
       await _cameraController.setFlashMode(FlashMode.off);
+    } catch (e) {
+      print('Error turning off flash: $e');
     }
     
     if (mounted) {
       setState(() {});
+      
       // Process frames every 2 seconds
-      Timer.periodic(Duration(seconds: 2), (timer) {
+      _processingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
         if (mounted && !_isProcessing) {
           _processFrame();
         }
@@ -81,6 +85,9 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     _isProcessing = true;
     
     try {
+      // Ensure flash is off before taking picture
+      await _cameraController.setFlashMode(FlashMode.off);
+      
       // Capture image
       final XFile file = await _cameraController.takePicture();
       
@@ -96,7 +103,11 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
       });
       
       // Delete the temporary file
-      File(file.path).delete();
+      await File(file.path).delete();
+      
+      // Extra precaution - ensure flash is off after taking picture
+      await _cameraController.setFlashMode(FlashMode.off);
+      
     } catch (e) {
       print('Error processing frame: $e');
     } finally {
@@ -185,6 +196,16 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   
   @override
   void dispose() {
+    // Cancel the timer to prevent memory leaks
+    _processingTimer?.cancel();
+    
+    // Turn off flash before disposing camera
+    try {
+      _cameraController.setFlashMode(FlashMode.off);
+    } catch (e) {
+      print('Error turning off flash during disposal: $e');
+    }
+    
     _cameraController.dispose();
     _interpreter.close();
     super.dispose();
@@ -224,7 +245,7 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
                 ),
               ),
               
-              // Results display (same as before)
+              // Results display
               Container(
                 padding: EdgeInsets.all(15),
                 decoration: BoxDecoration(
