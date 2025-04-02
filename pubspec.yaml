@@ -1,0 +1,22 @@
+name: place_recognition_app
+description: A simple place recognition app
+
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=2.17.0 <3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  camera: ^0.10.5+2
+  tflite_flutter: ^0.10.1
+  image: ^4.0.17
+  path_provider: ^2.0.15
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/models/feature_extractor.tflite
+    - assets/models/embeddings.json
