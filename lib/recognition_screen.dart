@@ -39,9 +39,17 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
       widget.camera,
       ResolutionPreset.medium,
       enableAudio: false,
+      imageFormatGroup: ImageFormatGroup.jpeg,
     );
     
     await _cameraController.initialize();
+    
+    // Turn off the flash
+    if (_cameraController.value.flashMode == FlashMode.torch ||
+        _cameraController.value.flashMode == FlashMode.always) {
+      await _cameraController.setFlashMode(FlashMode.off);
+    }
+    
     if (mounted) {
       setState(() {});
       // Process frames every 2 seconds
@@ -192,48 +200,62 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     
     return Scaffold(
       appBar: AppBar(title: Text('Place Recognition')),
-      body: Stack(
-        children: [
-          // Camera preview
-          Positioned.fill(
-            child: CameraPreview(_cameraController),
-          ),
-          
-          // Results display
-          Positioned(
-            bottom: 30,
-            left: 20,
-            right: 20,
-            child: Container(
-              padding: EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _recognizedPlace,
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+      body: OrientationBuilder(
+        builder: (context, orientation) {
+          return Column(
+            children: [
+              // Camera preview with proper aspect ratio
+              Expanded(
+                child: Container(
+                  child: ClipRect(
+                    child: OverflowBox(
+                      alignment: Alignment.center,
+                      child: FittedBox(
+                        fit: BoxFit.fitWidth,
+                        child: Container(
+                          width: MediaQuery.of(context).size.width,
+                          height: MediaQuery.of(context).size.width * 
+                            _cameraController.value.aspectRatio,
+                          child: CameraPreview(_cameraController),
+                        ),
+                      ),
                     ),
                   ),
-                  SizedBox(height: 5),
-                  Text(
-                    'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ],
+              
+              // Results display (same as before)
+              Container(
+                padding: EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.7),
+                ),
+                width: double.infinity,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _recognizedPlace,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: 5),
+                    Text(
+                      'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
