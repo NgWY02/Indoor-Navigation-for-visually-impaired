@@ -14,9 +14,11 @@ dependencies:
   tflite_flutter: ^0.10.1
   image: ^4.0.17
   path_provider: ^2.0.15
+  image_picker: ^1.0.4
+  supabase_flutter: ^2.8.4
+  uuid: ^4.1.0
 
 flutter:
   uses-material-design: true
   assets:
     - assets/models/feature_extractor.tflite
-    - assets/models/embeddings.json
