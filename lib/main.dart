@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'recognition_screen.dart';
 import 'capture_screen.dart';
 import 'services/supabase_service.dart';
+import 'services/ui_helper.dart';
+import 'auth/auth_wrapper.dart';
+import 'admin/admin_panel.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Ensure the system UI is visible in normal mode (not immersive)
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   
   // Initialize Supabase
   final supabaseService = SupabaseService();
@@ -31,7 +38,9 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: HomeScreen(cameras: cameras),
+      home: AuthWrapper(
+        child: HomeScreen(cameras: cameras),
+      ),
     );
   }
 }
@@ -48,37 +57,80 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   late List<Widget> _screens;
+  bool _isAdmin = false;
+  final SupabaseService _supabaseService = SupabaseService();
 
   @override
   void initState() {
     super.initState();
+    _loadUserRole();
     _screens = [
       RecognitionScreen(camera: widget.cameras.first),
       CaptureScreen(),
     ];
   }
 
+  Future<void> _loadUserRole() async {
+    try {
+      final isAdmin = await _supabaseService.isAdmin();
+      if (mounted) {
+        setState(() {
+          _isAdmin = isAdmin;
+          // If user is admin, add the admin panel to screens
+          if (_isAdmin && _screens.length < 3) {
+            _screens.add(const AdminPanel());
+          }
+        });
+      }
+    } catch (e) {
+      print('Error loading user role: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: _screens[_selectedIndex],
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.location_on),
-            label: 'Recognize',
+    return SafeArea(
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Indoor Navigation'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.logout),
+              onPressed: () async {
+                await _supabaseService.signOut();
+              },
+              tooltip: 'Sign Out',
+            ),
+          ],
+        ),
+        body: _selectedIndex < _screens.length 
+            ? _screens[_selectedIndex]
+            : _screens[0], // Fallback to first screen if index is out of bounds
+        bottomNavigationBar: UIHelper.bottomSafeArea(
+          child: BottomNavigationBar(
+            currentIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+              });
+            },
+            items: [
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.location_on),
+                label: 'Recognize',
+              ),
+              const BottomNavigationBarItem(
+                icon: Icon(Icons.add_a_photo),
+                label: 'Add Location',
+              ),
+              if (_isAdmin)
+                const BottomNavigationBarItem(
+                  icon: Icon(Icons.admin_panel_settings),
+                  label: 'Admin',
+                ),
+            ],
           ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.add_a_photo),
-            label: 'Add Location',
-          ),
-        ],
+        ),
       ),
     );
   }
