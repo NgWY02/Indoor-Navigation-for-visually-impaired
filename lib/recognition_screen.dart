@@ -1,13 +1,12 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'services/supabase_service.dart';
 
 class RecognitionScreen extends StatefulWidget {
   final CameraDescription camera;
@@ -26,13 +25,14 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   double _confidence = 0.0;
   bool _isProcessing = false;
   Timer? _processingTimer;
+  bool _isLoading = true;
   
   @override
   void initState() {
     super.initState();
     _initializeCamera();
     _loadModel();
-    _loadEmbeddings();
+    _loadEmbeddingsFromSupabase();
   }
   
   Future<void> _initializeCamera() async {
@@ -56,9 +56,9 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     if (mounted) {
       setState(() {});
       
-      // Process frames every 2 seconds
+      // Process frames every 1 second
       _processingTimer = Timer.periodic(Duration(seconds: 1), (timer) {
-        if (mounted && !_isProcessing) {
+        if (mounted && !_isProcessing && !_isLoading) {
           _processFrame();
         }
       });
@@ -69,14 +69,29 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     _interpreter = await Interpreter.fromAsset('assets/models/feature_extractor.tflite');
   }
   
-  Future<void> _loadEmbeddings() async {
-    final String embeddingsJson = await rootBundle.loadString('assets/models/embeddings.json');
-    final Map<String, dynamic> decoded = jsonDecode(embeddingsJson);
-    
-    // Convert JSON to proper structure
-    decoded.forEach((key, value) {
-      _storedEmbeddings[key] = List<double>.from(value);
-    });
+  Future<void> _loadEmbeddingsFromSupabase() async {
+    try {
+      setState(() {
+        _isLoading = true;
+        _recognizedPlace = "Loading locations...";
+      });
+      
+      final supabaseService = SupabaseService();
+      _storedEmbeddings = await supabaseService.getAllEmbeddings();
+      
+      setState(() {
+        _isLoading = false;
+        _recognizedPlace = _storedEmbeddings.isEmpty 
+            ? "No locations found. Add some first!" 
+            : "Scanning...";
+      });
+    } catch (e) {
+      print('Error loading embeddings from Supabase: $e');
+      setState(() {
+        _isLoading = false;
+        _recognizedPlace = "Error loading locations";
+      });
+    }
   }
   
   Future<void> _processFrame() async {
@@ -193,6 +208,11 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     
     return dotProduct / (normA * normB);
   }
+
+  // Refresh embeddings from Supabase
+  Future<void> _refreshEmbeddings() async {
+    await _loadEmbeddingsFromSupabase();
+  }
   
   @override
   void dispose() {
@@ -220,7 +240,16 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     }
     
     return Scaffold(
-      appBar: AppBar(title: Text('Place Recognition')),
+      appBar: AppBar(
+        title: Text('Place Recognition'),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.refresh),
+            onPressed: _refreshEmbeddings,
+            tooltip: 'Refresh Locations',
+          ),
+        ],
+      ),
       body: OrientationBuilder(
         builder: (context, orientation) {
           return Column(
@@ -264,13 +293,18 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
                       ),
                     ),
                     SizedBox(height: 5),
-                    Text(
-                      'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
+                    if (_recognizedPlace != "Unknown" && 
+                        _recognizedPlace != "Scanning..." && 
+                        _recognizedPlace != "Loading locations..." &&
+                        _recognizedPlace != "No locations found. Add some first!" &&
+                        _recognizedPlace != "Error loading locations")
+                      Text(
+                        'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
