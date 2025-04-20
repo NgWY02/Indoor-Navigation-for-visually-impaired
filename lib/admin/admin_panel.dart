@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
+import 'map_management.dart';
 
 class AdminPanel extends StatefulWidget {
   const AdminPanel({Key? key}) : super(key: key);
@@ -77,6 +78,14 @@ class _AdminPanelState extends State<AdminPanel> {
       );
     }
   }
+  
+  void _navigateToMapManagement() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const MapManagement(),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,27 +93,64 @@ class _AdminPanelState extends State<AdminPanel> {
       appBar: AppBar(
         title: const Text('Admin Panel'),
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        _errorMessage!,
-                        style: const TextStyle(color: Colors.red),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: _loadUsers,
-                        child: const Text('Try Again'),
-                      ),
-                    ],
+      body: Column(
+        children: [
+          // Admin actions section
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            color: Theme.of(context).primaryColor.withOpacity(0.1),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Admin Actions',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
                   ),
-                )
-              : _users.isEmpty
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _navigateToMapManagement,
+                        icon: const Icon(Icons.map),
+                        label: const Text('Map Management'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          // User management section
+          Expanded(
+            child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          _errorMessage!,
+                          style: const TextStyle(color: Colors.red),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: _loadUsers,
+                          child: const Text('Try Again'),
+                        ),
+                      ],
+                    ),
+                  )
+                : _users.isEmpty
                   ? const Center(
                       child: Text('No users found'),
                     )
@@ -161,6 +207,9 @@ class _AdminPanelState extends State<AdminPanel> {
                         },
                       ),
                     ),
+          ),
+        ],
+      ),
     );
   }
 }
