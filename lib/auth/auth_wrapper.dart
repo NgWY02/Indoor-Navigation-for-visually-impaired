@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/supabase_service.dart';
-import '../services/ui_helper.dart';
 import 'login_screen.dart';
-import '../main.dart';
 
 class AuthWrapper extends StatefulWidget {
   final Widget child;
