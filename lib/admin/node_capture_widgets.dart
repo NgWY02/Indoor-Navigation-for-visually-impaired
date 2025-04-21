@@ -79,18 +79,20 @@ class MapSelectionView extends StatelessWidget {
     required this.imageOffset,
     required this.nodeNameController,
     required this.onPositionSelected,
-    required this.existingNodes, // Add to constructor
+    required this.existingNodes,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    // Calculate aspect ratio of the map image
+    final double mapAspectRatio = mapImage.width / mapImage.height;
+    
     return SingleChildScrollView(
       child: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ... existing code for map name and instructions ...
             Text(
               'Map: ${mapData['name']}',
               style: const TextStyle(
@@ -110,58 +112,88 @@ class MapSelectionView extends StatelessWidget {
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.grey),
               ),
-              height: 400,
-              child: InteractiveViewer(
-                boundaryMargin: const EdgeInsets.all(20.0),
-                minScale: 0.5,
-                maxScale: 4.0,
-                child: GestureDetector(
-                  onTapDown: (TapDownDetails details) {
-                    onPositionSelected(details.localPosition);
-                  },
-                  child: Stack(
-                    children: [
-                      // Map Image
-                      RawImage(
-                        image: mapImage,
-                        fit: BoxFit.contain,
-                        width: double.infinity,
-                        height: double.infinity,
-                      ),
-                      
-                      // Markers for existing nodes
-                      ...existingNodes.map((node) {
-                        // Ensure positions are doubles
-                        final double x = (node['x_position'] as num?)?.toDouble() ?? 0.0;
-                        final double y = (node['y_position'] as num?)?.toDouble() ?? 0.0;
-                        return Positioned(
-                          left: x - 10, // Adjust offset for smaller marker
-                          top: y - 10,  // Adjust offset for smaller marker
-                          child: Tooltip(
-                            message: node['name'] ?? 'Existing Node', // Show name on hover/long-press
-                            child: const Icon(
-                              Icons.circle, // Use a simple circle marker
-                              color: Colors.blue, // Different color for existing nodes
-                              size: 20, // Smaller size
+              // Use LayoutBuilder to get available width and maintain aspect ratio
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // Calculate height based on available width and aspect ratio
+                  final containerWidth = constraints.maxWidth;
+                  final containerHeight = containerWidth / mapAspectRatio;
+                  
+                  // Calculate scale factors for node positioning
+                  final scaleX = containerWidth / mapImage.width;
+                  final scaleY = containerHeight / mapImage.height;
+                  
+                  return SizedBox(
+                    width: containerWidth,
+                    height: containerHeight,
+                    child: InteractiveViewer(
+                      boundaryMargin: const EdgeInsets.all(20.0),
+                      minScale: 0.5,
+                      maxScale: 4.0,
+                      child: GestureDetector(
+                        onTapDown: (TapDownDetails details) {
+                          // Adjust tap position based on scale
+                          final adjustedPosition = Offset(
+                            details.localPosition.dx / scaleX,
+                            details.localPosition.dy / scaleY
+                          );
+                          onPositionSelected(adjustedPosition);
+                        },
+                        child: Stack(
+                          children: [
+                            // Map Image
+                            SizedBox(
+                              width: containerWidth,
+                              height: containerHeight,
+                              child: RawImage(
+                                image: mapImage,
+                                fit: BoxFit.fill, // Use fill to ensure the image fills the container
+                                width: containerWidth,
+                                height: containerHeight,
+                              ),
                             ),
-                          ),
-                        );
-                      }).toList(),
+                            
+                            // Markers for existing nodes
+                            ...existingNodes.map((node) {
+                              // Get original coordinates from database
+                              final double x = (node['x_position'] as num?)?.toDouble() ?? 0.0;
+                              final double y = (node['y_position'] as num?)?.toDouble() ?? 0.0;
+                              
+                              // Scale coordinates to current view
+                              final double displayX = x * scaleX;
+                              final double displayY = y * scaleY;
+                              
+                              return Positioned(
+                                left: displayX - 10, // Adjust offset for marker
+                                top: displayY - 10,  // Adjust offset for marker
+                                child: Tooltip(
+                                  message: node['name'] ?? 'Existing Node', 
+                                  child: const Icon(
+                                    Icons.circle,
+                                    color: Colors.blue,
+                                    size: 20,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
 
-                      // Marker for the currently selected new position
-                      if (selectedPosition != null)
-                        Positioned(
-                          left: selectedPosition!.dx - 15,
-                          top: selectedPosition!.dy - 30,
-                          child: const Icon(
-                            Icons.location_on,
-                            color: Colors.red, // Red for the new node
-                            size: 30,
-                          ),
+                            // Marker for the currently selected new position
+                            if (selectedPosition != null)
+                              Positioned(
+                                left: selectedPosition!.dx * scaleX - 15,
+                                top: selectedPosition!.dy * scaleY - 30,
+                                child: const Icon(
+                                  Icons.location_on,
+                                  color: Colors.red,
+                                  size: 30,
+                                ),
+                              ),
+                          ],
                         ),
-                    ],
-                  ),
-                ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
             
