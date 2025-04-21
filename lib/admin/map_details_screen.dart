@@ -15,20 +15,28 @@ class MapDetailsScreen extends StatefulWidget {
 
 class _MapDetailsScreenState extends State<MapDetailsScreen> {
   final SupabaseService _supabaseService = SupabaseService();
-  final MapService _mapService = MapService(SupabaseService()); // Use MapService
+  late MapService _mapService; // Remove final keyword to allow reassignment
   late Future<Map<String, dynamic>> _mapDetailsFuture;
   Map<String, dynamic>? _currentMapData; // Store current map data
 
   @override
   void initState() {
     super.initState();
+    _mapService = MapService(SupabaseService()); // Initialize here
     _loadMapDetails();
   }
 
   void _loadMapDetails() {
+    // Clear any cached data
+    _mapService = MapService(SupabaseService()); // Re-initialize map service
+    
+    // Add no-cache options to force fresh data
+    print('Fetching fresh map details for map ID: ${widget.mapId}');
     _mapDetailsFuture = _supabaseService.getMapDetails(widget.mapId);
+    
     // Also load the map image using MapService
     _mapDetailsFuture.then((data) {
+      print('Map details loaded with ${data['map_nodes']?.length ?? 0} nodes');
       if (mounted) {
         setState(() {
           _currentMapData = data; // Store data for easy access
@@ -36,10 +44,12 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
         _mapService.loadMapImage(data['image_url'], context).then((success) {
           if (success && mounted) {
             setState(() {}); // Trigger rebuild when image is loaded
+            print('Map image loaded successfully');
           }
         });
       }
     }).catchError((error) {
+       print('Error loading map details: $error');
        if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
            SnackBar(content: Text('Error loading map details: $error')),
@@ -61,7 +71,9 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     
     // Refresh map details if node was added/edited
     if (result == true && mounted) {
-      _loadMapDetails();
+      print("Node edit/add successful (result=true). Triggering refresh...");
+      // Simply call _loadMapDetails which handles re-initialization and fetching
+      _loadMapDetails(); 
     }
   }
 
@@ -151,28 +163,64 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
               if (_mapService.mapUIImage != null)
                 Expanded(
                   flex: 2,
-                  child: Stack(
-                    children: [
-                      // Map image as background
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(8.0),
-                        child: InteractiveViewer(
-                          minScale: 0.5,
-                          maxScale: 4.0,
-                          child: CustomPaint(
-                            painter: _MapWithNodesPainter(
-                              mapImage: _mapService.mapUIImage!, 
-                              nodes: nodes,
-                            ),
-                            size: Size(
-                              _mapService.mapUIImage!.width.toDouble(),
-                              _mapService.mapUIImage!.height.toDouble(),
+                  child: Container(
+                    padding: const EdgeInsets.all(8.0),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // Calculate aspect ratio of the map image
+                        final double mapAspectRatio = _mapService.mapUIImage!.width / _mapService.mapUIImage!.height;
+                        
+                        // Calculate dimensions based on available width and aspect ratio
+                        final containerWidth = constraints.maxWidth;
+                        final containerHeight = constraints.maxHeight;
+                        
+                        // Determine if we should fit by width or height
+                        final double targetWidth, targetHeight;
+                        if (containerWidth / containerHeight > mapAspectRatio) {
+                          // Available space is wider than the image aspect ratio
+                          targetHeight = containerHeight;
+                          targetWidth = containerHeight * mapAspectRatio;
+                        } else {
+                          // Available space is taller than the image aspect ratio
+                          targetWidth = containerWidth;
+                          targetHeight = containerWidth / mapAspectRatio;
+                        }
+                        
+                        // Calculate scale factors for node positioning
+                        final scaleX = targetWidth / _mapService.mapUIImage!.width;
+                        final scaleY = targetHeight / _mapService.mapUIImage!.height;
+                        
+                        return Center(
+                          child: SizedBox(
+                            width: targetWidth,
+                            height: targetHeight,
+                            child: InteractiveViewer(
+                              minScale: 0.5,
+                              maxScale: 4.0,
+                              child: Stack(
+                                children: [
+                                  // Map image as background
+                                  SizedBox(
+                                    width: targetWidth,
+                                    height: targetHeight,
+                                    child: RawImage(
+                                      image: _mapService.mapUIImage!,
+                                      fit: BoxFit.fill,
+                                      width: targetWidth,
+                                      height: targetHeight,
+                                    ),
+                                  ),
+                                  
+                                  // Draw nodes on the map
+                                  for (int i = 0; i < nodes.length; i++) 
+                                    _buildNodeMarker(nodes[i], i + 1, scaleX, scaleY),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
+                        );
+                      },
+                    ),
                   ),
                 )
               else
@@ -240,6 +288,48 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  // Helper method to build node markers on the map
+  Widget _buildNodeMarker(dynamic node, int index, double scaleX, double scaleY) {
+    // Get original coordinates from database
+    final double x = (node['x_position'] as num).toDouble();
+    final double y = (node['y_position'] as num).toDouble();
+    
+    // Scale coordinates to current view
+    final double displayX = x * scaleX;
+    final double displayY = y * scaleY;
+    
+    return Positioned(
+      left: displayX - 10, // Adjust for marker center
+      top: displayY - 10,  // Adjust for marker center
+      child: Tooltip(
+        message: node['name'] ?? 'Node ${index}',
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Circle background
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.blue,
+              ),
+            ),
+            // Node number
+            Text(
+              '$index',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

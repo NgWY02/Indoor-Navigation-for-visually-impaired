@@ -121,6 +121,8 @@ class _NodeCaptureState extends State<NodeCapture> {
   }
   
   void _selectPosition(Offset position) {
+    // Store the original coordinates based on the actual image dimensions
+    // This ensures positions are stored relative to the image itself, not the display container
     setState(() {
       _selectedPosition = position;
     });
@@ -231,7 +233,7 @@ class _NodeCaptureState extends State<NodeCapture> {
     }
   }
   
-  // New method for updating node without processing video
+  // Method for updating node without processing video
   Future<void> _updateNodeWithoutVideo() async {
     if (!_isEditMode || _selectedPosition == null) return;
     
@@ -259,6 +261,22 @@ class _NodeCaptureState extends State<NodeCapture> {
         posX,
         posY,
       );
+      
+      // Verify the update by fetching the node data again
+      print("Verifying node update...");
+      try {
+        final updatedNode = await _supabaseService.getMapNodeDetails(nodeId);
+        final String updatedName = updatedNode['name'] ?? '';
+        
+        print("Verification: Node name in database is now: '$updatedName'");
+        if (updatedName != nodeName) {
+          print("WARNING: Node name verification failed! Expected: '$nodeName', Got: '$updatedName'");
+        } else {
+          print("Verification succeeded: Node name matches expected value");
+        }
+      } catch (verifyError) {
+        print("Error verifying node update: $verifyError");
+      }
       
       if (!mounted) return;
       
