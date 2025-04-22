@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'recognition_screen.dart';
-import 'capture_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/ui_helper.dart';
 import 'auth/auth_wrapper.dart';
@@ -66,7 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUserRole();
     _screens = [
       RecognitionScreen(camera: widget.cameras.first),
-      CaptureScreen(),
+      // CaptureScreen removed
     ];
   }
 
@@ -77,7 +76,7 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _isAdmin = isAdmin;
           // If user is admin, add the admin panel to screens
-          if (_isAdmin && _screens.length < 3) {
+          if (_isAdmin) {
             _screens.add(const AdminPanel());
           }
         });
@@ -119,10 +118,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 icon: Icon(Icons.location_on),
                 label: 'Recognize',
               ),
-              const BottomNavigationBarItem(
-                icon: Icon(Icons.add_a_photo),
-                label: 'Add Location',
-              ),
+              // "Add Location" tab removed
               if (_isAdmin)
                 const BottomNavigationBarItem(
                   icon: Icon(Icons.admin_panel_settings),
