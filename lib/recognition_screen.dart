@@ -168,29 +168,29 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     
     // Generate guidance text based on angle difference
     if (angleDiff.abs() <= 15) {
-      _directionGuidance = "The entrance is in front of you";
-      verboseGuidance = "The entrance to $_recognizedPlace is straight ahead of you";
+      _directionGuidance = "The location is in front of you";
+      verboseGuidance = "The location $_recognizedPlace is straight ahead of you";
     } else if (angleDiff > 15 && angleDiff <= 45) {
-      _directionGuidance = "The entrance is slightly to your right";
-      verboseGuidance = "The entrance to $_recognizedPlace is slightly to your right";
+      _directionGuidance = "The location is slightly to your left";
+      verboseGuidance = "The location $_recognizedPlace is slightly to your left";
     } else if (angleDiff > 45 && angleDiff <= 90) {
-      _directionGuidance = "The entrance is to your right";
-      verboseGuidance = "The entrance to $_recognizedPlace is to your right, turn 90 degrees clockwise";
+      _directionGuidance = "The location is to your left";
+      verboseGuidance = "The location $_recognizedPlace is to your left, turn 90 degrees clockwise";
     } else if (angleDiff > 90 && angleDiff < 165) {
-      _directionGuidance = "The entrance is far to your right";
-      verboseGuidance = "The entrance to $_recognizedPlace is far to your right, almost behind you";
+      _directionGuidance = "The location is to your left";
+      verboseGuidance = "The location $_recognizedPlace is to your left, almost behind you";
     } else if (angleDiff < -15 && angleDiff >= -45) {
-      _directionGuidance = "The entrance is slightly to your left";
-      verboseGuidance = "The entrance to $_recognizedPlace is slightly to your left";
+      _directionGuidance = "The location is slightly to your right";
+      verboseGuidance = "The location $_recognizedPlace is slightly to your right";
     } else if (angleDiff < -45 && angleDiff >= -90) {
-      _directionGuidance = "The entrance is to your left";
-      verboseGuidance = "The entrance to $_recognizedPlace is to your left, turn 90 degrees counterclockwise";
+      _directionGuidance = "The location is to your right";
+      verboseGuidance = "The location $_recognizedPlace is to your right, turn 90 degrees counterclockwise";
     } else if (angleDiff < -90 && angleDiff > -165) {
-      _directionGuidance = "The entrance is far to your left";
-      verboseGuidance = "The entrance to $_recognizedPlace is far to your left, almost behind you";
+      _directionGuidance = "The location is to your right";
+      verboseGuidance = "The location $_recognizedPlace is to your right, almost behind you";
     } else {
-      _directionGuidance = "The entrance is behind you";
-      verboseGuidance = "The entrance to $_recognizedPlace is behind you, please turn around";
+      _directionGuidance = "The location is behind you";
+      verboseGuidance = "The location $_recognizedPlace is behind you, please turn around";
     }
     
     // If guidance changed, provide haptic feedback and speak

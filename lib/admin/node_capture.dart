@@ -148,12 +148,13 @@ class _NodeCaptureState extends State<NodeCapture> {
         _capturedDirection = _videoProcessorService.entranceDirection;
       });
       
-      // Show feedback
+      // Show feedback for 1 second
       if (mounted && _capturedDirection != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Direction captured: ${_capturedDirection!.toStringAsFixed(1)}°'),
             backgroundColor: Colors.green,
+            duration: const Duration(seconds: 1),
           ),
         );
       }
@@ -161,7 +162,10 @@ class _NodeCaptureState extends State<NodeCapture> {
       debugPrint('Error capturing direction: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error capturing direction: $e')),
+          SnackBar(
+            content: Text('Error capturing direction: $e'),
+            duration: const Duration(seconds: 1),
+          ),
         );
       }
     }
@@ -369,7 +373,7 @@ class _NodeCaptureState extends State<NodeCapture> {
       });
     }
   }
-
+  
   @override
   void dispose() {
     _nodeNameController.dispose();
@@ -585,13 +589,13 @@ class _NodeCaptureState extends State<NodeCapture> {
           Expanded(
             child: OutlinedButton(
               onPressed: () {
-                setState(() {
-                  _videoFile = null;
-                  _isVideoLoaded = false;
-                  _videoPlayerController?.dispose();
-                  _videoPlayerController = null;
-                });
-              },
+        setState(() {
+          _videoFile = null;
+          _isVideoLoaded = false;
+          _videoPlayerController?.dispose();
+          _videoPlayerController = null;
+        });
+      },
               style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 minimumSize: const Size(double.infinity, 50),
@@ -665,7 +669,7 @@ class _NodeCaptureState extends State<NodeCapture> {
           'Record 360° Video',
           style: TextStyle(color: Colors.white),
         ),
-      );
+    );
     }
   }
 }
