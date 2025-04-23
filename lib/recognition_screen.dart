@@ -213,7 +213,7 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     // Create the controller (flashMode isn't a constructor parameter)
     _cameraController = CameraController(
       widget.camera,
-      ResolutionPreset.medium,
+      ResolutionPreset.high,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.jpeg
     );

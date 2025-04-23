@@ -104,7 +104,7 @@ class VideoProcessorService {
       final duration = videoInfo.duration.inMilliseconds;
       
       // Extract a frame every second (1000 ms)
-      final frameInterval = 1000; // milliseconds
+      final frameInterval = 700; // milliseconds
       int frameCount = (duration / frameInterval).ceil();
       
       for (int i = 0; i < frameCount; i++) {
