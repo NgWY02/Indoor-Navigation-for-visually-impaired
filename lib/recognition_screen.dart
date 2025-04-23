@@ -4,6 +4,8 @@ import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_compass/flutter_compass.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'services/supabase_service.dart';
@@ -27,12 +29,86 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   Timer? _processingTimer;
   bool _isLoading = true;
   
+  // New direction-related variables
+  double? _currentHeading;
+  StreamSubscription<CompassEvent>? _compassSubscription;
+  // Map to store node locations and their reference directions
+  Map<String, Map<String, dynamic>> _locationDirections = {};
+  String _directionGuidance = "";
+  
   @override
   void initState() {
     super.initState();
+    _requestLocationPermission();
     _initializeCamera();
     _loadModel();
     _loadEmbeddingsFromSupabase();
+    _initializeCompass();
+  }
+  
+  // Request permissions for compass
+  Future<void> _requestLocationPermission() async {
+    if (Platform.isAndroid) {
+      await Permission.location.request();
+    }
+  }
+  
+  // Initialize compass
+  void _initializeCompass() {
+    // Check if compass is available on this device
+    if (FlutterCompass.events == null) {
+      print('Compass not available on this device');
+      return;
+    }
+    
+    // Listen to the compass stream
+    _compassSubscription = FlutterCompass.events!.listen((event) {
+      if (mounted && event.heading != null) {
+        setState(() {
+          _currentHeading = event.heading;
+          // Update direction guidance if we have a recognized place
+          _updateDirectionGuidance();
+        });
+      }
+    });
+  }
+  
+  // Update direction guidance based on current heading and recognized place
+  void _updateDirectionGuidance() {
+    if (_recognizedPlace == "Unknown" || 
+        _recognizedPlace == "Scanning..." || 
+        _recognizedPlace == "Loading locations..." ||
+        _recognizedPlace == "No locations found. Add some first!" ||
+        _recognizedPlace == "Error loading locations" ||
+        _currentHeading == null) {
+      _directionGuidance = "";
+      return;
+    }
+    
+    // Check if we have direction data for this location
+    final locationData = _locationDirections[_recognizedPlace];
+    if (locationData == null || locationData['reference_direction'] == null) {
+      _directionGuidance = "";
+      return;
+    }
+    
+    // Get the reference direction for this location
+    final double referenceDirection = locationData['reference_direction'];
+    
+    // Calculate the angle difference between current heading and reference
+    double angleDiff = (_currentHeading! - referenceDirection) % 360;
+    if (angleDiff > 180) angleDiff = angleDiff - 360;
+    
+    // Generate guidance text based on angle difference
+    if (angleDiff.abs() <= 15) {
+      _directionGuidance = "The entrance is in front of you";
+    } else if (angleDiff > 15 && angleDiff < 165) {
+      _directionGuidance = "The entrance is to your right";
+    } else if (angleDiff < -15 && angleDiff > -165) {
+      _directionGuidance = "The entrance is to your left";
+    } else {
+      _directionGuidance = "The entrance is behind you";
+    }
   }
   
   Future<void> _initializeCamera() async {
@@ -79,6 +155,9 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
       final supabaseService = SupabaseService();
       _storedEmbeddings = await supabaseService.getAllEmbeddings();
       
+      // Load node data to get reference directions
+      await _loadNodeData();
+      
       setState(() {
         _isLoading = false;
         _recognizedPlace = _storedEmbeddings.isEmpty 
@@ -91,6 +170,39 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
         _isLoading = false;
         _recognizedPlace = "Error loading locations";
       });
+    }
+  }
+  
+  // New method to load node data with direction information
+  Future<void> _loadNodeData() async {
+    try {
+      final supabaseService = SupabaseService();
+      
+      // Get all maps
+      final List<Map<String, dynamic>> maps = await supabaseService.getMaps();
+      
+      for (final map in maps) {
+        // Get detailed map info including nodes
+        final mapDetails = await supabaseService.getMapDetails(map['id']);
+        final nodes = List<Map<String, dynamic>>.from(mapDetails['map_nodes'] ?? []);
+        
+        // Store node direction data
+        for (final node in nodes) {
+          final String nodeName = node['name'] ?? '';
+          final double? referenceDirection = (node['reference_direction'] as num?)?.toDouble();
+          
+          if (nodeName.isNotEmpty) {
+            _locationDirections[nodeName] = {
+              'id': node['id'],
+              'reference_direction': referenceDirection,
+            };
+          }
+        }
+      }
+      
+      print('Loaded direction data for ${_locationDirections.length} locations');
+    } catch (e) {
+      print('Error loading node direction data: $e');
     }
   }
   
@@ -115,6 +227,8 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
       setState(() {
         _recognizedPlace = result.keys.first;
         _confidence = result.values.first;
+        // Update direction guidance based on new recognition
+        _updateDirectionGuidance();
       });
       
       // Delete the temporary file
@@ -219,6 +333,9 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     // Cancel the timer to prevent memory leaks
     _processingTimer?.cancel();
     
+    // Cancel compass subscription
+    _compassSubscription?.cancel();
+    
     // Turn off flash before disposing camera
     try {
       _cameraController.setFlashMode(FlashMode.off);
@@ -274,6 +391,24 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
                 ),
               ),
               
+              // Compass indicator
+              if (_currentHeading != null)
+                Container(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  color: Colors.grey.shade100,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.explore, color: Colors.blue),
+                      SizedBox(width: 8),
+                      Text(
+                        'Heading: ${_currentHeading!.toStringAsFixed(1)}°',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              
               // Results display
               Container(
                 padding: EdgeInsets.all(15),
@@ -298,12 +433,34 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
                         _recognizedPlace != "Loading locations..." &&
                         _recognizedPlace != "No locations found. Add some first!" &&
                         _recognizedPlace != "Error loading locations")
-                      Text(
-                        'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                        ),
+                      Column(
+                        children: [
+                          Text(
+                            'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                            ),
+                          ),
+                          if (_directionGuidance.isNotEmpty) ...[
+                            SizedBox(height: 8),
+                            Container(
+                              padding: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.blue,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                _directionGuidance,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                   ],
                 ),

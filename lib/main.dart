@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'recognition_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/ui_helper.dart';
@@ -10,8 +12,22 @@ import 'admin/admin_panel.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
+  // Lock orientation to portrait for better compass functionality
+  await SystemChrome.setPreferredOrientations([
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.portraitDown,
+  ]);
+  
   // Ensure the system UI is visible in normal mode (not immersive)
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  
+  // Request permissions needed for Android
+  if (Platform.isAndroid) {
+    await [
+      Permission.camera,
+      Permission.location,
+    ].request();
+  }
   
   // Initialize Supabase
   final supabaseService = SupabaseService();

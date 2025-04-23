@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as path;
+import 'dart:math';
 
 // Define user roles
 enum UserRole {
@@ -566,7 +567,7 @@ class SupabaseService {
   }
 
   // Map Node Methods
-  Future<String> createMapNode(String mapId, String nodeName, double x, double y) async {
+  Future<String> createMapNode(String mapId, String nodeName, double x, double y, {double? referenceDirection}) async {
     try {
       final String nodeId = uuid.v4();
       final userId = currentUser?.id;
@@ -581,6 +582,7 @@ class SupabaseService {
         'name': nodeName,
         'x_position': x,
         'y_position': y,
+        'reference_direction': referenceDirection, // Store the entrance direction if provided
         'created_at': DateTime.now().toIso8601String(),
         'user_id': userId,
       });
@@ -608,7 +610,7 @@ class SupabaseService {
   }
 
   // Update an existing map node and related place_embeddings if they exist
-  Future<void> updateMapNode(String nodeId, String nodeName, double x, double y) async {
+  Future<void> updateMapNode(String nodeId, String nodeName, double x, double y, {double? referenceDirection}) async {
     try {
       final userId = currentUser?.id;
       if (userId == null) {
@@ -618,15 +620,23 @@ class SupabaseService {
       final bool isAdminUser = await isAdmin();
       print('Attempting updateMapNode. User ID: $userId, Is Admin: $isAdminUser');
 
+      // Prepare update data
+      final Map<String, dynamic> updateData = {
+        'name': nodeName,
+        'x_position': x,
+        'y_position': y,
+      };
+      
+      // Only add reference_direction if it's provided
+      if (referenceDirection != null) {
+        updateData['reference_direction'] = referenceDirection;
+      }
+
       print('Updating node in map_nodes table: $nodeId, name: "$nodeName"');
       // Modify the update call to select the result
       final updateResponse = await client
           .from('map_nodes')
-          .update({
-            'name': nodeName,
-            'x_position': x,
-            'y_position': y,
-          })
+          .update(updateData)
           .eq('id', nodeId)
           .select() // Add .select() here
           .maybeSingle(); // Use maybeSingle in case RLS *still* blocks it
@@ -780,17 +790,64 @@ class SupabaseService {
       
       final response = await query;
       
-      Map<String, List<double>> embeddings = {};
+      // Create a map to store embeddings and counts for each place name
+      Map<String, List<List<double>>> embeddingsByPlace = {};
       
+      // Group embeddings by place name
       for (final item in response) {
         final String placeName = item['place_name'];
         final List<dynamic> rawEmbedding = jsonDecode(item['embedding']);
         final List<double> embedding = rawEmbedding.map<double>((e) => e is int ? e.toDouble() : e as double).toList();
         
-        embeddings[placeName] = embedding;
+        // Add to list of embeddings for this place
+        if (!embeddingsByPlace.containsKey(placeName)) {
+          embeddingsByPlace[placeName] = [];
+        }
+        embeddingsByPlace[placeName]!.add(embedding);
       }
       
-      return embeddings;
+      // Average the embeddings for each place
+      Map<String, List<double>> finalEmbeddings = {};
+      embeddingsByPlace.forEach((placeName, embeddings) {
+        // If only one embedding, use it directly
+        if (embeddings.length == 1) {
+          finalEmbeddings[placeName] = embeddings[0];
+          return;
+        }
+        
+        // Average multiple embeddings
+        final int embeddingSize = embeddings[0].length;
+        List<double> averagedEmbedding = List<double>.filled(embeddingSize, 0.0);
+        
+        // Sum all embeddings
+        for (final List<double> embedding in embeddings) {
+          for (int i = 0; i < embeddingSize; i++) {
+            averagedEmbedding[i] += embedding[i];
+          }
+        }
+        
+        // Divide by count to get average
+        for (int i = 0; i < embeddingSize; i++) {
+          averagedEmbedding[i] = averagedEmbedding[i] / embeddings.length;
+        }
+        
+        // Normalize the averaged embedding (ensure it's a unit vector)
+        double magnitude = 0.0;
+        for (int i = 0; i < embeddingSize; i++) {
+          magnitude += averagedEmbedding[i] * averagedEmbedding[i];
+        }
+        magnitude = sqrt(magnitude);
+        
+        if (magnitude > 0) {
+          for (int i = 0; i < embeddingSize; i++) {
+            averagedEmbedding[i] = averagedEmbedding[i] / magnitude;
+          }
+        }
+        
+        finalEmbeddings[placeName] = averagedEmbedding;
+      });
+      
+      return finalEmbeddings;
     } catch (e) {
       print('Error loading embeddings: $e');
       return {};
