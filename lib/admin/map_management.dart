@@ -137,7 +137,20 @@ class _MapManagementState extends State<MapManagement> {
       MaterialPageRoute(
         builder: (context) => NodeCapture(mapId: _selectedMap!['id']),
       ),
-    );
+    ).then((result) {
+      // Refresh the maps after returning from node capture
+      // This ensures node count is updated immediately
+      if (result == true) {
+        _loadMaps();
+        // Show success snackbar
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Node added successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    });
   }
 
   // Add a new method to navigate to map details screen

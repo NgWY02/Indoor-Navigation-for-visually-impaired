@@ -72,8 +72,7 @@ class MapSelectionView extends StatelessWidget {
   final TextEditingController nodeNameController;
   final Function(Offset position) onPositionSelected;
   final List<Map<String, dynamic>> existingNodes;
-  final Function()? onCaptureEntranceDirection;
-  final double? capturedDirection;
+  final bool showDirectionCapture; // New parameter to control whether to show direction capture
 
   const MapSelectionView({
     Key? key,
@@ -85,8 +84,7 @@ class MapSelectionView extends StatelessWidget {
     required this.nodeNameController,
     required this.onPositionSelected,
     required this.existingNodes,
-    this.onCaptureEntranceDirection,
-    this.capturedDirection,
+    this.showDirectionCapture = false, // Default to false
   }) : super(key: key);
 
   @override
@@ -220,18 +218,6 @@ class MapSelectionView extends StatelessWidget {
                   hintText: 'e.g., Reception, Room 101',
                   border: OutlineInputBorder(),
                 ),
-              ),
-              
-              // Direction capture
-              const SizedBox(height: 24),
-              const Text(
-                '3. Capture entrance direction',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              CompassDirectionView(
-                onCaptureDirection: onCaptureEntranceDirection,
-                capturedDirection: capturedDirection,
               ),
             ],
           ],
@@ -385,28 +371,42 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
           
           const SizedBox(height: 16),
           
-          // Capture button
+          // Capture/Refresh buttons
           if (isCompassAvailable) 
-            ElevatedButton(
-              onPressed: hasCapturedDirection ? null : widget.onCaptureDirection,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                backgroundColor: hasCapturedDirection ? Colors.green : null,
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    hasCapturedDirection ? Icons.check : Icons.camera,
-                    size: 20,
+            hasCapturedDirection
+              ? Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Success text 
+                    const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Direction Captured',
+                      style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 16),
+                    // Refresh button to recapture
+                    ElevatedButton.icon(
+                      onPressed: widget.onCaptureDirection,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Recapture'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                )
+              : ElevatedButton.icon(
+                  onPressed: widget.onCaptureDirection,
+                  icon: const Icon(Icons.camera),
+                  label: const Text('Capture Current Direction'),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
                   ),
-                  const SizedBox(width: 8),
-                  Text(
-                    hasCapturedDirection ? 'Direction Captured' : 'Capture Current Direction',
-                  ),
-                ],
-              ),
-            ),
+                ),
         ],
       ),
     );
@@ -514,6 +514,7 @@ class ActionButton extends StatelessWidget {
   final String resetButtonText; // NEW: Dynamic text for reset button
   final bool isPositionSelected;
   final bool isNameEntered;
+  final bool isDirectionCaptured; // Add this parameter for direction capture
   final VoidCallback? onProceedToCamera;
   final bool isReadyForCameraView;
   final VoidCallback? onLaunchCamera;
@@ -530,6 +531,7 @@ class ActionButton extends StatelessWidget {
     this.resetButtonText = 'Record Again', // Default text
     required this.isPositionSelected,
     required this.isNameEntered,
+    required this.isDirectionCaptured, // Add direction parameter
     this.onProceedToCamera,
     required this.isReadyForCameraView,
     this.onLaunchCamera,
@@ -628,8 +630,8 @@ class ActionButton extends StatelessWidget {
       );
     }
 
-    // 3. Position selected and name entered, BEFORE clicking Next - Show Next button
-    if (isPositionSelected && isNameEntered && onProceedToCamera != null && !isReadyForCameraView) {
+    // 3. Position selected, name entered, and direction captured - Show Next button
+    if (isPositionSelected && isNameEntered && isDirectionCaptured && onProceedToCamera != null && !isReadyForCameraView) {
       return ElevatedButton(
         onPressed: onProceedToCamera,
         style: ElevatedButton.styleFrom(
@@ -647,5 +649,260 @@ class ActionButton extends StatelessWidget {
     
     // 4. Default/Fallback - Show nothing or disabled button
     return const SizedBox.shrink();
+  }
+}
+
+// New widget for dedicated direction capture screen
+class DirectionCaptureView extends StatelessWidget {
+  final String locationName;
+  final VoidCallback? onCaptureDirection;
+  final double? capturedDirection;
+
+  const DirectionCaptureView({
+    Key? key,
+    required this.locationName,
+    this.onCaptureDirection,
+    this.capturedDirection,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Center(
+              child: Text(
+                'Set Entrance Direction for "$locationName"',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Instructions
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Instructions:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '1. Stand at the location and face the main entrance or approach direction',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '2. Hold your phone in a natural position in front of you',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '3. Tap the "Capture Current Direction" button',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Compass
+            const Text(
+              'Direction Capture',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            CompassDirectionView(
+              onCaptureDirection: onCaptureDirection,
+              capturedDirection: capturedDirection,
+            ),
+            
+            // Status message
+            if (capturedDirection != null) ...[
+              const SizedBox(height: 16),
+              Center(
+                child: Text(
+                  'Direction captured successfully! You can continue to the next step.',
+                  style: const TextStyle(
+                    color: Colors.green,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 16),
+              Center(
+                child: Text(
+                  'Please capture the entrance direction to continue.',
+                  style: TextStyle(
+                    color: Colors.orange.shade800,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// New widget for video recording instructions
+class VideoInstructionsView extends StatelessWidget {
+  final String locationName;
+  final double? direction;
+  final VoidCallback? onRecordVideo;
+
+  const VideoInstructionsView({
+    Key? key,
+    required this.locationName,
+    this.direction,
+    this.onRecordVideo,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    // Format direction for display
+    final String directionText = direction != null 
+        ? '${direction!.toStringAsFixed(1)}°' 
+        : 'Not set';
+    
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Center(
+              child: Text(
+                'Record Video for "$locationName"',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Location details
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Location Details:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Text('Name: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(locationName),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      const Text('Entrance Direction: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                      Text(directionText),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Video recording instructions
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text(
+                    'Recording Instructions:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '1. Stand at the exact location you marked on the map',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '2. Hold your phone steadily and press the Record button',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '3. Slowly rotate 360° to capture the entire surroundings',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '4. Try to maintain a consistent speed while rotating',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '5. The video should be 30 seconds long',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            // Visual guide
+            Center(
+              child: Column(
+                children: const [
+                  Icon(
+                    Icons.videocam,
+                    size: 64,
+                    color: Colors.red,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Press the Record button below when ready',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

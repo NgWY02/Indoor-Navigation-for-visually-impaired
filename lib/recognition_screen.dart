@@ -4,7 +4,9 @@ import 'dart:math';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
@@ -36,6 +38,13 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   Map<String, Map<String, dynamic>> _locationDirections = {};
   String _directionGuidance = "";
   
+  // TTS related variables
+  late FlutterTts _flutterTts;
+  String _lastSpokenGuidance = "";
+  bool _isSpeaking = false;
+  Timer? _speakTimer;
+  double _speechVolume = 1.0; // Add volume control variable
+  
   @override
   void initState() {
     super.initState();
@@ -44,6 +53,60 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     _loadModel();
     _loadEmbeddingsFromSupabase();
     _initializeCompass();
+    _initializeTts();
+  }
+  
+  // Initialize TTS
+  Future<void> _initializeTts() async {
+    _flutterTts = FlutterTts();
+    await _flutterTts.setLanguage("en-US");
+    await _flutterTts.setSpeechRate(0.5); // Slightly slower speech rate
+    await _flutterTts.setVolume(_speechVolume);
+    await _flutterTts.setPitch(1.0);
+    
+    // Setup completion listener
+    _flutterTts.setCompletionHandler(() {
+      setState(() {
+        _isSpeaking = false;
+      });
+    });
+  }
+  
+  // Speak text with TTS
+  Future<void> _speak(String text) async {
+    // Don't speak if already speaking or text is empty or same as last spoken text
+    if (_isSpeaking || text.isEmpty || text == _lastSpokenGuidance) return;
+    
+    setState(() {
+      _isSpeaking = true;
+      _lastSpokenGuidance = text;
+    });
+    
+    // Update volume before speaking
+    await _flutterTts.setVolume(_speechVolume);
+    await _flutterTts.speak(text);
+  }
+  
+  // Adjust speech volume
+  Future<void> _adjustVolume(double change) async {
+    double newVolume = _speechVolume + change;
+    // Ensure volume is between 0.0 and 1.0
+    newVolume = newVolume.clamp(0.0, 1.0);
+    
+    if (newVolume != _speechVolume) {
+      setState(() {
+        _speechVolume = newVolume;
+      });
+      await _flutterTts.setVolume(_speechVolume);
+      
+      // Provide haptic feedback for volume change
+      HapticFeedback.lightImpact();
+      
+      // Speak current volume level
+      if (!_isSpeaking) {
+        _speak("Volume ${(_speechVolume * 100).round()} percent");
+      }
+    }
   }
   
   // Request permissions for compass
@@ -99,15 +162,50 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
     double angleDiff = (_currentHeading! - referenceDirection) % 360;
     if (angleDiff > 180) angleDiff = angleDiff - 360;
     
+    // Previous direction guidance if any
+    String previousGuidance = _directionGuidance;
+    String verboseGuidance = "";
+    
     // Generate guidance text based on angle difference
     if (angleDiff.abs() <= 15) {
       _directionGuidance = "The entrance is in front of you";
-    } else if (angleDiff > 15 && angleDiff < 165) {
+      verboseGuidance = "The entrance to $_recognizedPlace is straight ahead of you";
+    } else if (angleDiff > 15 && angleDiff <= 45) {
+      _directionGuidance = "The entrance is slightly to your right";
+      verboseGuidance = "The entrance to $_recognizedPlace is slightly to your right";
+    } else if (angleDiff > 45 && angleDiff <= 90) {
       _directionGuidance = "The entrance is to your right";
-    } else if (angleDiff < -15 && angleDiff > -165) {
+      verboseGuidance = "The entrance to $_recognizedPlace is to your right, turn 90 degrees clockwise";
+    } else if (angleDiff > 90 && angleDiff < 165) {
+      _directionGuidance = "The entrance is far to your right";
+      verboseGuidance = "The entrance to $_recognizedPlace is far to your right, almost behind you";
+    } else if (angleDiff < -15 && angleDiff >= -45) {
+      _directionGuidance = "The entrance is slightly to your left";
+      verboseGuidance = "The entrance to $_recognizedPlace is slightly to your left";
+    } else if (angleDiff < -45 && angleDiff >= -90) {
       _directionGuidance = "The entrance is to your left";
+      verboseGuidance = "The entrance to $_recognizedPlace is to your left, turn 90 degrees counterclockwise";
+    } else if (angleDiff < -90 && angleDiff > -165) {
+      _directionGuidance = "The entrance is far to your left";
+      verboseGuidance = "The entrance to $_recognizedPlace is far to your left, almost behind you";
     } else {
       _directionGuidance = "The entrance is behind you";
+      verboseGuidance = "The entrance to $_recognizedPlace is behind you, please turn around";
+    }
+    
+    // If guidance changed, provide haptic feedback and speak
+    if (_directionGuidance != previousGuidance && _directionGuidance.isNotEmpty) {
+      // Provide haptic feedback
+      HapticFeedback.mediumImpact();
+      
+      // Cancel any pending speak timer
+      _speakTimer?.cancel();
+      
+      // Set a slight delay before speaking to prevent rapid TTS changes
+      _speakTimer = Timer(Duration(milliseconds: 500), () {
+        // Use more verbose guidance for speech
+        _speak("You are at $_recognizedPlace. $verboseGuidance");
+      });
     }
   }
   
@@ -332,6 +430,10 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   void dispose() {
     // Cancel the timer to prevent memory leaks
     _processingTimer?.cancel();
+    _speakTimer?.cancel();
+    
+    // Stop TTS and dispose
+    _flutterTts.stop();
     
     // Cancel compass subscription
     _compassSubscription?.cancel();
@@ -360,6 +462,20 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
       appBar: AppBar(
         title: Text('Place Recognition'),
         actions: [
+          // Manual speak button
+          if (_directionGuidance.isNotEmpty && _recognizedPlace != "Unknown" && 
+              _recognizedPlace != "Scanning..." && 
+              _recognizedPlace != "Loading locations..." &&
+              _recognizedPlace != "No locations found. Add some first!" &&
+              _recognizedPlace != "Error loading locations")
+            IconButton(
+              icon: Icon(Icons.record_voice_over),
+              onPressed: () {
+                String fullGuidance = "You are at $_recognizedPlace. $_directionGuidance";
+                _speak(fullGuidance);
+              },
+              tooltip: 'Speak Guidance Again',
+            ),
           IconButton(
             icon: Icon(Icons.refresh),
             onPressed: _refreshEmbeddings,
@@ -367,107 +483,74 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
           ),
         ],
       ),
-      body: OrientationBuilder(
-        builder: (context, orientation) {
-          return Column(
-            children: [
-              // Camera preview with proper aspect ratio
-              Expanded(
-                child: Container(
-                  child: ClipRect(
-                    child: OverflowBox(
-                      alignment: Alignment.center,
-                      child: FittedBox(
-                        fit: BoxFit.fitWidth,
-                        child: Container(
-                          width: MediaQuery.of(context).size.width,
-                          height: MediaQuery.of(context).size.width * 
-                            _cameraController.value.aspectRatio,
-                          child: CameraPreview(_cameraController),
-                        ),
-                      ),
-                    ),
-                  ),
+      body: Column(
+        children: [
+          // Camera preview taking more vertical space
+          Expanded(
+            flex: 5, // Give more space to the camera view
+            child: OverflowBox(
+              alignment: Alignment.center,
+              child: FittedBox(
+                fit: BoxFit.cover,
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width,
+                  height: MediaQuery.of(context).size.width * 
+                    _cameraController.value.aspectRatio,
+                  child: CameraPreview(_cameraController),
                 ),
               ),
-              
-              // Compass indicator
-              if (_currentHeading != null)
-                Container(
-                  padding: EdgeInsets.symmetric(vertical: 8),
-                  color: Colors.grey.shade100,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.explore, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text(
-                        'Heading: ${_currentHeading!.toStringAsFixed(1)}°',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                    ],
+            ),
+          ),
+          
+          // Results display with reduced size
+          Expanded(
+            flex: 1, // Smaller space for results display
+            child: Container(
+              width: double.infinity,
+              color: Colors.black.withOpacity(0.7),
+              padding: EdgeInsets.symmetric(horizontal: 15, vertical: 8),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _recognizedPlace,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-              
-              // Results display
-              Container(
-                padding: EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.7),
-                ),
-                width: double.infinity,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+                  if (_recognizedPlace != "Unknown" && 
+                      _recognizedPlace != "Scanning..." && 
+                      _recognizedPlace != "Loading locations..." &&
+                      _recognizedPlace != "No locations found. Add some first!" &&
+                      _recognizedPlace != "Error loading locations") ...[
+                    SizedBox(height: 4),
                     Text(
-                      _recognizedPlace,
+                      'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
                       style: TextStyle(
                         color: Colors.white,
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
                       ),
                     ),
-                    SizedBox(height: 5),
-                    if (_recognizedPlace != "Unknown" && 
-                        _recognizedPlace != "Scanning..." && 
-                        _recognizedPlace != "Loading locations..." &&
-                        _recognizedPlace != "No locations found. Add some first!" &&
-                        _recognizedPlace != "Error loading locations")
-                      Column(
-                        children: [
-                          Text(
-                            'Confidence: ${(_confidence * 100).toStringAsFixed(1)}%',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                            ),
-                          ),
-                          if (_directionGuidance.isNotEmpty) ...[
-                            SizedBox(height: 8),
-                            Container(
-                              padding: EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.blue,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                _directionGuidance,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
+                    if (_directionGuidance.isNotEmpty) ...[
+                      SizedBox(height: 4),
+                      Text(
+                        _directionGuidance,
+                        style: TextStyle(
+                          color: Colors.blue,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
+                    ],
                   ],
-                ),
+                ],
               ),
-            ],
-          );
-        },
+            ),
+          ),
+        ],
       ),
     );
   }
