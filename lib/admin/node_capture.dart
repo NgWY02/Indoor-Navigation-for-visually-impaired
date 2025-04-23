@@ -52,6 +52,9 @@ class _NodeCaptureState extends State<NodeCapture> {
   // New state variable for direction
   double? _capturedDirection;
   
+  // New state variable for current view
+  int _currentStep = 1; // 1: Map/Name, 2: Direction, 3: Video
+  
   // Map loading
   late Future<Map<String, dynamic>> _mapFuture;
   
@@ -351,6 +354,22 @@ class _NodeCaptureState extends State<NodeCapture> {
     }
   }
   
+  // Move to next step in the workflow
+  void _nextStep() {
+    setState(() {
+      _currentStep++;
+    });
+  }
+  
+  // Go back to previous step
+  void _previousStep() {
+    if (_currentStep > 1) {
+      setState(() {
+        _currentStep--;
+      });
+    }
+  }
+
   @override
   void dispose() {
     _nodeNameController.dispose();
@@ -363,8 +382,14 @@ class _NodeCaptureState extends State<NodeCapture> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        // Change title based on mode
+        // Change title based on mode and step
         title: Text(_isEditMode ? 'Edit Location Node' : 'Add Location Node'),
+        leading: _currentStep > 1 
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back),
+                onPressed: _previousStep,
+              ) 
+            : null,
       ),
       body: _isLoadingNodeData
           ? const Center(child: CircularProgressIndicator()) // Show loading when fetching node data
@@ -407,8 +432,9 @@ class _NodeCaptureState extends State<NodeCapture> {
                       return const Center(child: CircularProgressIndicator());
                     }
 
-                    // Determine which view to show
+                    // Determine which view to show based on current step
                     Widget currentView;
+                    
                     if (_isVideoLoaded && _videoPlayerController != null) {
                       // Show video preview if loaded
                       currentView = VideoPreview(
@@ -426,8 +452,8 @@ class _NodeCaptureState extends State<NodeCapture> {
                           _videoPlayerController!.seekTo(Duration.zero);
                         },
                       );
-                    } else {
-                      // Otherwise, show map selection view
+                    } else if (_currentStep == 1) {
+                      // Step 1: Map selection and naming
                       currentView = MapSelectionView(
                         mapData: mapData,
                         mapImage: _mapService.mapUIImage!,
@@ -437,8 +463,21 @@ class _NodeCaptureState extends State<NodeCapture> {
                         nodeNameController: _nodeNameController,
                         onPositionSelected: _selectPosition,
                         existingNodes: existingNodes,
-                        onCaptureEntranceDirection: _captureEntranceDirection,
+                        showDirectionCapture: false, // Don't show direction capture here
+                      );
+                    } else if (_currentStep == 2) {
+                      // Step 2: Direction capture screen
+                      currentView = DirectionCaptureView(
+                        locationName: _nodeNameController.text,
+                        onCaptureDirection: _captureEntranceDirection,
                         capturedDirection: _capturedDirection,
+                      );
+                    } else {
+                      // Step 3: Video recording
+                      currentView = VideoInstructionsView(
+                        locationName: _nodeNameController.text,
+                        direction: _capturedDirection,
+                        onRecordVideo: _recordVideoWithNativeCamera,
                       );
                     }
                     
@@ -452,35 +491,23 @@ class _NodeCaptureState extends State<NodeCapture> {
                             children: [
                               StepIndicator(
                                 step: 1,
-                                label: 'Select Position',
-                                isComplete: _selectedPosition != null,
-                                isActive: _selectedPosition == null,
+                                label: 'Map & Name',
+                                isComplete: _selectedPosition != null && _nodeNameController.text.isNotEmpty,
+                                isActive: _currentStep == 1,
                               ),
                               const SizedBox(width: 4),
                               StepIndicator(
                                 step: 2,
-                                label: 'Name Node',
-                                isComplete: _nodeNameController.text.isNotEmpty,
-                                isActive: _selectedPosition != null && _nodeNameController.text.isEmpty,
+                                label: 'Set Direction',
+                                isComplete: _capturedDirection != null,
+                                isActive: _currentStep == 2,
                               ),
                               const SizedBox(width: 4),
                               StepIndicator(
                                 step: 3,
-                                label: 'Set Direction',
-                                isComplete: _capturedDirection != null,
-                                isActive: _selectedPosition != null && 
-                                          _nodeNameController.text.isNotEmpty && 
-                                          _capturedDirection == null,
-                              ),
-                              const SizedBox(width: 4),
-                              StepIndicator(
-                                step: 4,
-                                label: _isEditMode ? 'Record New Video' : 'Record 360° Video',
+                                label: 'Record Video',
                                 isComplete: _videoFile != null,
-                                isActive: _selectedPosition != null && 
-                                          _nodeNameController.text.isNotEmpty && 
-                                          _capturedDirection != null && 
-                                          _videoFile == null,
+                                isActive: _currentStep == 3,
                               ),
                             ],
                           ),
@@ -518,39 +545,127 @@ class _NodeCaptureState extends State<NodeCapture> {
                        _selectedPosition != null && 
                        _nodeNameController.text.isNotEmpty;
     
-    // For new nodes or when updating with new video, also require the direction
-    bool readyToRecord = !_isEditMode && 
-                        _selectedPosition != null && 
-                        _nodeNameController.text.isNotEmpty && 
-                        _capturedDirection != null;
-    
-    return ActionButton(
-      isVideoLoaded: _isVideoLoaded,
-      onVideoLoaded: _processVideo,
-      buttonText: _isEditMode ? 'Update Node' : 'Process Video', // Change button text based on mode
-      isNamedPositionSelected: readyToRecord || canSaveEdits,
-      onLaunchCamera: _recordVideoWithNativeCamera,
-      onResetVideo: _videoFile != null ? () {
-        setState(() {
-          _videoFile = null;
-          _isVideoLoaded = false;
-          _videoPlayerController?.dispose();
-          _videoPlayerController = null;
-          _readyForCameraView = true;
-        });
-      } : null,
-      resetButtonText: "Record Again",
-      isPositionSelected: _selectedPosition != null,
-      isNameEntered: _nodeNameController.text.isNotEmpty,
-      onProceedToCamera: () {
-        setState(() {
-          _readyForCameraView = true;
-        });
-      },
-      isReadyForCameraView: _readyForCameraView,
-      // New prop: Allow saving in edit mode without recording new video
-      canSaveWithoutVideo: canSaveEdits,
-      onSaveWithoutVideo: canSaveEdits ? _updateNodeWithoutVideo : null,
-    );
+    // Show different buttons based on current step
+    if (_currentStep == 1) {
+      // Step 1: Show Next button if position and name are entered
+      bool canProceed = _selectedPosition != null && _nodeNameController.text.isNotEmpty;
+      return ElevatedButton(
+        onPressed: canProceed ? _nextStep : null,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          minimumSize: const Size(double.infinity, 50),
+          backgroundColor: Theme.of(context).primaryColor,
+          foregroundColor: Colors.white,
+        ),
+        child: const Text(
+          'Next: Set Direction',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    } else if (_currentStep == 2) {
+      // Step 2: Show Next button if direction is captured
+      return ElevatedButton(
+        onPressed: _capturedDirection != null ? _nextStep : null,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          minimumSize: const Size(double.infinity, 50),
+          backgroundColor: Theme.of(context).primaryColor,
+          foregroundColor: Colors.white,
+        ),
+        child: const Text(
+          'Next: Record Video',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    } else if (_isVideoLoaded) {
+      // Video is loaded - Show Process/Update button
+      return Row(
+        children: [
+          // Add Record Again button
+          Expanded(
+            child: OutlinedButton(
+              onPressed: () {
+                setState(() {
+                  _videoFile = null;
+                  _isVideoLoaded = false;
+                  _videoPlayerController?.dispose();
+                  _videoPlayerController = null;
+                });
+              },
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              child: const Text("Record Again"),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _processVideo,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                minimumSize: const Size(double.infinity, 50),
+                backgroundColor: Theme.of(context).primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                _isEditMode ? 'Update Node' : 'Process Video',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else if (canSaveEdits) {
+      // Edit mode - can save without new video
+      return Row(
+        children: [
+          // Option to record video if desired
+          Expanded(
+            child: OutlinedButton(
+              onPressed: _recordVideoWithNativeCamera,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                minimumSize: const Size(double.infinity, 50),
+              ),
+              child: const Text('Record New Video'),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Save changes without new video
+          Expanded(
+            child: ElevatedButton(
+              onPressed: _updateNodeWithoutVideo,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                minimumSize: const Size(double.infinity, 50),
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text(
+                'Save Changes',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // Step 3: Record video button
+      return ElevatedButton(
+        onPressed: _recordVideoWithNativeCamera,
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          minimumSize: const Size(double.infinity, 50),
+          backgroundColor: Colors.red,
+          foregroundColor: Colors.white,
+        ),
+        child: const Text(
+          'Record 360° Video',
+          style: TextStyle(color: Colors.white),
+        ),
+      );
+    }
   }
 }

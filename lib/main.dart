@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'recognition_screen.dart';
+import 'profile_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/ui_helper.dart';
 import 'auth/auth_wrapper.dart';
@@ -56,6 +57,11 @@ class MyApp extends StatelessWidget {
       home: AuthWrapper(
         child: HomeScreen(cameras: cameras),
       ),
+      routes: {
+        '/login': (context) => AuthWrapper(child: HomeScreen(cameras: cameras)),
+        '/admin': (context) => const AdminPanel(),
+        '/profile': (context) => const ProfileScreen(),
+      },
     );
   }
 }
@@ -81,7 +87,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUserRole();
     _screens = [
       RecognitionScreen(camera: widget.cameras.first),
-      // CaptureScreen removed
+      const ProfileScreen(),
     ];
   }
 
@@ -91,10 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _isAdmin = isAdmin;
-          // If user is admin, add the admin panel to screens
-          if (_isAdmin) {
-            _screens.add(const AdminPanel());
-          }
+          // Admin panel is now accessible via profile page, not as a separate tab
         });
       }
     } catch (e) {
@@ -106,18 +109,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Indoor Navigation'),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () async {
-                await _supabaseService.signOut();
-              },
-              tooltip: 'Sign Out',
-            ),
-          ],
-        ),
         body: _selectedIndex < _screens.length 
             ? _screens[_selectedIndex]
             : _screens[0], // Fallback to first screen if index is out of bounds
@@ -129,17 +120,16 @@ class _HomeScreenState extends State<HomeScreen> {
                 _selectedIndex = index;
               });
             },
-            items: [
-              const BottomNavigationBarItem(
+            items: const [
+              BottomNavigationBarItem(
                 icon: Icon(Icons.location_on),
                 label: 'Recognize',
               ),
-              // "Add Location" tab removed
-              if (_isAdmin)
-                const BottomNavigationBarItem(
-                  icon: Icon(Icons.admin_panel_settings),
-                  label: 'Admin',
-                ),
+              BottomNavigationBarItem(
+                icon: Icon(Icons.person),
+                label: 'Profile',
+              ),
+              // Admin tab removed from bottom navigation
             ],
           ),
         ),
