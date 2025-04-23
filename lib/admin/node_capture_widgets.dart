@@ -229,32 +229,34 @@ class MapSelectionView extends StatelessWidget {
 
 // New widget for compass direction
 class CompassDirectionView extends StatefulWidget {
-  final Function()? onCaptureDirection;
+  final VoidCallback? onCaptureDirection;
   final double? capturedDirection;
 
   const CompassDirectionView({
-    Key? key, 
+    Key? key,
     this.onCaptureDirection,
     this.capturedDirection,
   }) : super(key: key);
 
   @override
-  _CompassDirectionViewState createState() => _CompassDirectionViewState();
+  State<CompassDirectionView> createState() => _CompassDirectionViewState();
 }
 
 class _CompassDirectionViewState extends State<CompassDirectionView> {
-  double? _currentHeading;
   StreamSubscription<CompassEvent>? _compassSubscription;
-
+  double? _currentHeading;
+  bool _showCaptureSuccess = false; // Add state for temporary success indicator
+  Timer? _feedbackTimer; // Timer to control the visibility of the success indicator
+  
   @override
   void initState() {
     super.initState();
-    _startCompassListening();
+    _initializeCompass();
   }
-
-  void _startCompassListening() {
+  
+  void _initializeCompass() {
+    // Check if compass is available on this device
     if (FlutterCompass.events == null) {
-      // Device doesn't have sensors
       return;
     }
     
@@ -267,9 +269,34 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
     });
   }
 
+  // Handle capture with temporary feedback
+  void _handleCapture() {
+    if (widget.onCaptureDirection != null) {
+      widget.onCaptureDirection!();
+      
+      // Show temporary success indicator for 1 second
+      setState(() {
+        _showCaptureSuccess = true;
+      });
+      
+      // Clear any existing timer
+      _feedbackTimer?.cancel();
+      
+      // Set timer to hide the success indicator after 1 second
+      _feedbackTimer = Timer(const Duration(seconds: 1), () {
+        if (mounted) {
+          setState(() {
+            _showCaptureSuccess = false;
+          });
+        }
+      });
+    }
+  }
+
   @override
   void dispose() {
     _compassSubscription?.cancel();
+    _feedbackTimer?.cancel(); // Cancel timer when disposing
     super.dispose();
   }
 
@@ -327,6 +354,24 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
                         ),
                       ),
                     ),
+                    
+                    // Temporary capture success indicator
+                    if (_showCaptureSuccess)
+                      Container(
+                        width: 140,
+                        height: 140,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: Colors.green.withOpacity(0.3),
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.check_circle_outline,
+                            color: Colors.green,
+                            size: 50,
+                          ),
+                        ),
+                      ),
                     
                     // Direction indicator
                     if (_currentHeading != null)
@@ -387,7 +432,7 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
                     const SizedBox(width: 16),
                     // Refresh button to recapture
                     ElevatedButton.icon(
-                      onPressed: widget.onCaptureDirection,
+                      onPressed: _handleCapture, // Use the handle method instead
                       icon: const Icon(Icons.refresh),
                       label: const Text('Recapture'),
                       style: ElevatedButton.styleFrom(
@@ -398,7 +443,7 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
                   ],
                 )
               : ElevatedButton.icon(
-                  onPressed: widget.onCaptureDirection,
+                  onPressed: _handleCapture, // Use the handle method instead
                   icon: const Icon(Icons.camera),
                   label: const Text('Capture Current Direction'),
                   style: ElevatedButton.styleFrom(
@@ -702,7 +747,7 @@ class DirectionCaptureView extends StatelessWidget {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    '1. Stand at the location and face the main entrance or approach direction',
+                    '1. Stand still and face the location',
                     style: TextStyle(fontSize: 14),
                   ),
                   SizedBox(height: 4),
