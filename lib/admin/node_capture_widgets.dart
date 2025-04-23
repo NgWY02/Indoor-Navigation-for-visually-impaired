@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:ui' as ui;
+import 'dart:math' as math;
+import 'dart:async';
+import 'package:flutter_compass/flutter_compass.dart';
 
 class StepIndicator extends StatelessWidget {
   final int step;
@@ -69,6 +72,8 @@ class MapSelectionView extends StatelessWidget {
   final TextEditingController nodeNameController;
   final Function(Offset position) onPositionSelected;
   final List<Map<String, dynamic>> existingNodes;
+  final Function()? onCaptureEntranceDirection;
+  final double? capturedDirection;
 
   const MapSelectionView({
     Key? key,
@@ -80,6 +85,8 @@ class MapSelectionView extends StatelessWidget {
     required this.nodeNameController,
     required this.onPositionSelected,
     required this.existingNodes,
+    this.onCaptureEntranceDirection,
+    this.capturedDirection,
   }) : super(key: key);
 
   @override
@@ -214,9 +221,193 @@ class MapSelectionView extends StatelessWidget {
                   border: OutlineInputBorder(),
                 ),
               ),
+              
+              // Direction capture
+              const SizedBox(height: 24),
+              const Text(
+                '3. Capture entrance direction',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              CompassDirectionView(
+                onCaptureDirection: onCaptureEntranceDirection,
+                capturedDirection: capturedDirection,
+              ),
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+// New widget for compass direction
+class CompassDirectionView extends StatefulWidget {
+  final Function()? onCaptureDirection;
+  final double? capturedDirection;
+
+  const CompassDirectionView({
+    Key? key, 
+    this.onCaptureDirection,
+    this.capturedDirection,
+  }) : super(key: key);
+
+  @override
+  _CompassDirectionViewState createState() => _CompassDirectionViewState();
+}
+
+class _CompassDirectionViewState extends State<CompassDirectionView> {
+  double? _currentHeading;
+  StreamSubscription<CompassEvent>? _compassSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _startCompassListening();
+  }
+
+  void _startCompassListening() {
+    if (FlutterCompass.events == null) {
+      // Device doesn't have sensors
+      return;
+    }
+    
+    _compassSubscription = FlutterCompass.events!.listen((event) {
+      if (mounted && event.heading != null) {
+        setState(() {
+          _currentHeading = event.heading;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _compassSubscription?.cancel();
+    super.dispose();
+  }
+
+  // Helper to get cardinal direction
+  String _getCardinalDirection(double? heading) {
+    if (heading == null) return 'N/A';
+    
+    const List<String> cardinalDirections = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    int index = ((heading + 22.5) % 360 / 45).floor();
+    return cardinalDirections[index % 8];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isCompassAvailable = FlutterCompass.events != null;
+    final bool hasCapturedDirection = widget.capturedDirection != null;
+    
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        children: [
+          // Compass visualization
+          SizedBox(
+            height: 120,
+            child: isCompassAvailable 
+              ? Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // Compass housing  
+                    Container(
+                      width: 100,
+                      height: 100,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.blue.shade50,
+                        border: Border.all(color: Colors.blue.shade300),
+                      ),
+                      child: Center(
+                        child: Text(
+                          // Show either captured direction or current heading
+                          hasCapturedDirection
+                              ? "${widget.capturedDirection!.toStringAsFixed(1)}° (${_getCardinalDirection(widget.capturedDirection)})"
+                              : _currentHeading != null 
+                                  ? "${_currentHeading!.toStringAsFixed(1)}° (${_getCardinalDirection(_currentHeading)})"
+                                  : "Waiting...",
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: hasCapturedDirection ? Colors.green : Colors.blue,
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    // Direction indicator
+                    if (_currentHeading != null)
+                      Transform.rotate(
+                        angle: ((_currentHeading! * math.pi) / 180) * -1,
+                        child: Container(
+                          width: 120,
+                          height: 120,
+                          alignment: Alignment.topCenter,
+                          child: Icon(
+                            Icons.arrow_upward,
+                            color: hasCapturedDirection ? Colors.grey : Colors.red,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                      
+                    // If we have a captured direction, also show it as a fixed marker
+                    if (hasCapturedDirection)
+                      Transform.rotate(
+                        angle: ((widget.capturedDirection! * math.pi) / 180) * -1,
+                        child: Container(
+                          width: 120,
+                          height: 120,
+                          alignment: Alignment.topCenter,
+                          child: const Icon(
+                            Icons.assistant_navigation,
+                            color: Colors.green,
+                            size: 32,
+                          ),
+                        ),
+                      ),
+                  ],
+                )
+              : const Center(
+                  child: Text(
+                    'Compass sensor not available on this device',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Capture button
+          if (isCompassAvailable) 
+            ElevatedButton(
+              onPressed: hasCapturedDirection ? null : widget.onCaptureDirection,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                backgroundColor: hasCapturedDirection ? Colors.green : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    hasCapturedDirection ? Icons.check : Icons.camera,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    hasCapturedDirection ? 'Direction Captured' : 'Capture Current Direction',
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

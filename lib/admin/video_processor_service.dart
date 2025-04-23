@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as thumb;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:image/image.dart' as img;
+import 'package:flutter_compass/flutter_compass.dart';
 import '../services/supabase_service.dart';
 
 class VideoProcessorService {
@@ -19,7 +20,38 @@ class VideoProcessorService {
   String processingMessage = '';
   List<File> extractedFrames = [];
   
-  VideoProcessorService(this._supabaseService);
+  // Direction state
+  double? entranceDirection;
+  Stream<CompassEvent>? compassStream;
+  
+  VideoProcessorService(this._supabaseService) {
+    // Initialize the compass stream if available on the device
+    compassStream = FlutterCompass.events;
+  }
+  
+  // Method to get current compass heading
+  Future<double?> getCurrentHeading() async {
+    try {
+      // If the compass stream is not available, return null
+      if (compassStream == null) {
+        debugPrint('Compass not available on this device');
+        return null;
+      }
+      
+      // Listen for a single compass event
+      final CompassEvent? event = await compassStream!.first;
+      return event?.heading;
+    } catch (e) {
+      debugPrint('Error getting compass heading: $e');
+      return null;
+    }
+  }
+  
+  // Save the current compass heading as entrance direction
+  Future<void> captureEntranceDirection() async {
+    entranceDirection = await getCurrentHeading();
+    debugPrint('Captured entrance direction: $entranceDirection°');
+  }
   
   Future<void> loadModel() async {
     try {
@@ -40,11 +72,15 @@ class VideoProcessorService {
     required double positionY,
     required Function(double progress, String message) onProgressUpdate,
     String? nodeId, // Add optional nodeId for updates
+    double? referenceDirection, // Add optional reference direction
   }) async {
     if (!_isModelLoaded) {
       onProgressUpdate(0.0, 'Error: Model not loaded.');
       return;
     }
+
+    // Use the provided reference direction or the captured entrance direction
+    final double? directionToSave = referenceDirection ?? entranceDirection;
 
     isProcessingVideo = true;
     processingProgress = 0.0;
@@ -99,6 +135,7 @@ class VideoProcessorService {
         positionY: positionY,
         onProgressUpdate: onProgressUpdate,
         nodeId: nodeId, // Pass nodeId to processExtractedFrames
+        referenceDirection: directionToSave, // Pass the direction
       );
       
     } catch (e) {
@@ -115,6 +152,7 @@ class VideoProcessorService {
     required double positionY,
     required Function(double progress, String message) onProgressUpdate,
     String? nodeId, // Add optional nodeId for updates
+    double? referenceDirection, // Add optional reference direction
   }) async {
     if (extractedFrames.isEmpty) {
       processingMessage = 'No frames were extracted from the video';
@@ -132,13 +170,25 @@ class VideoProcessorService {
       String finalNodeId;
       if (nodeId != null) {
         // Update existing node details (name/position might have changed)
-        await _supabaseService.updateMapNode(nodeId, nodeName, positionX, positionY);
+        await _supabaseService.updateMapNode(
+          nodeId, 
+          nodeName, 
+          positionX, 
+          positionY,
+          referenceDirection: referenceDirection,
+        );
         finalNodeId = nodeId;
-        print("Updating existing node: $finalNodeId");
+        print("Updating existing node: $finalNodeId" + (referenceDirection != null ? " with direction: $referenceDirection°" : ""));
       } else {
         // Create new node
-        finalNodeId = await _supabaseService.createMapNode(mapId, nodeName, positionX, positionY);
-        print("Created new node: $finalNodeId");
+        finalNodeId = await _supabaseService.createMapNode(
+          mapId, 
+          nodeName, 
+          positionX, 
+          positionY,
+          referenceDirection: referenceDirection,
+        );
+        print("Created new node: $finalNodeId" + (referenceDirection != null ? " with direction: $referenceDirection°" : ""));
       }
       
       // Process each frame and save embeddings
@@ -149,10 +199,8 @@ class VideoProcessorService {
         processingMessage = 'Processing frame ${i + 1} of ${extractedFrames.length}';
         onProgressUpdate(processingProgress, processingMessage);
         
-        // Add a suffix for multiple frames
-        final String frameNodeName = extractedFrames.length > 1 
-          ? '$nodeName (${i + 1})' 
-          : nodeName;
+        // Use the original nodeName for all frames without adding a suffix
+        final String frameNodeName = nodeName;
           
         // Extract embedding
         final embedding = await extractEmbedding(extractedFrames[i]);

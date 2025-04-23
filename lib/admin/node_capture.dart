@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/supabase_service.dart';
 import 'map_service.dart';
 import 'video_processor_service.dart';
@@ -48,6 +49,9 @@ class _NodeCaptureState extends State<NodeCapture> {
   bool _isLoadingNodeData = false;
   Map<String, dynamic>? _existingNodeData;
   
+  // New state variable for direction
+  double? _capturedDirection;
+  
   // Map loading
   late Future<Map<String, dynamic>> _mapFuture;
   
@@ -75,6 +79,16 @@ class _NodeCaptureState extends State<NodeCapture> {
     _nodeNameController.addListener(() {
       setState(() {});
     });
+    
+    // Request location permission for compass on Android
+    _requestLocationPermission();
+  }
+  
+  // Request location permission for compass on Android
+  Future<void> _requestLocationPermission() async {
+    if (Platform.isAndroid) {
+      await Permission.location.request();
+    }
   }
   
   // Load existing node data when in edit mode
@@ -101,6 +115,9 @@ class _NodeCaptureState extends State<NodeCapture> {
           final double y = (nodeData['y_position'] as num?)?.toDouble() ?? 0.0;
           _selectedPosition = Offset(x, y);
           
+          // Set reference direction if available
+          _capturedDirection = (nodeData['reference_direction'] as num?)?.toDouble();
+          
           // In edit mode, we're ready to record right away if needed
           _readyForCameraView = true;
           
@@ -115,6 +132,33 @@ class _NodeCaptureState extends State<NodeCapture> {
         });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading node data: $e')),
+        );
+      }
+    }
+  }
+  
+  // Capture current direction from compass
+  Future<void> _captureEntranceDirection() async {
+    try {
+      await _videoProcessorService.captureEntranceDirection();
+      setState(() {
+        _capturedDirection = _videoProcessorService.entranceDirection;
+      });
+      
+      // Show feedback
+      if (mounted && _capturedDirection != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Direction captured: ${_capturedDirection!.toStringAsFixed(1)}°'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error capturing direction: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error capturing direction: $e')),
         );
       }
     }
@@ -208,6 +252,7 @@ class _NodeCaptureState extends State<NodeCapture> {
       positionX: _selectedPosition!.dx,
       positionY: _selectedPosition!.dy,
       nodeId: widget.nodeId, // Pass nodeId if editing
+      referenceDirection: _capturedDirection, // Pass captured direction
       onProgressUpdate: (progress, message) {
         if (mounted) {
           setState(() {
@@ -253,13 +298,15 @@ class _NodeCaptureState extends State<NodeCapture> {
       print("DEBUG: Updating node $nodeId:");
       print("  - Name: '$nodeName'");
       print("  - Position: ($posX, $posY)");
+      print("  - Direction: ${_capturedDirection != null ? '${_capturedDirection!.toStringAsFixed(1)}°' : 'Not set'}");
       
-      // Update node name and position only
+      // Update node name, position, and direction
       await _supabaseService.updateMapNode(
         nodeId,
         nodeName,
         posX,
         posY,
+        referenceDirection: _capturedDirection,
       );
       
       // Verify the update by fetching the node data again
@@ -390,6 +437,8 @@ class _NodeCaptureState extends State<NodeCapture> {
                         nodeNameController: _nodeNameController,
                         onPositionSelected: _selectPosition,
                         existingNodes: existingNodes,
+                        onCaptureEntranceDirection: _captureEntranceDirection,
+                        capturedDirection: _capturedDirection,
                       );
                     }
                     
@@ -417,9 +466,21 @@ class _NodeCaptureState extends State<NodeCapture> {
                               const SizedBox(width: 4),
                               StepIndicator(
                                 step: 3,
+                                label: 'Set Direction',
+                                isComplete: _capturedDirection != null,
+                                isActive: _selectedPosition != null && 
+                                          _nodeNameController.text.isNotEmpty && 
+                                          _capturedDirection == null,
+                              ),
+                              const SizedBox(width: 4),
+                              StepIndicator(
+                                step: 4,
                                 label: _isEditMode ? 'Record New Video' : 'Record 360° Video',
                                 isComplete: _videoFile != null,
-                                isActive: _selectedPosition != null && _nodeNameController.text.isNotEmpty && _videoFile == null,
+                                isActive: _selectedPosition != null && 
+                                          _nodeNameController.text.isNotEmpty && 
+                                          _capturedDirection != null && 
+                                          _videoFile == null,
                               ),
                             ],
                           ),
@@ -453,13 +514,21 @@ class _NodeCaptureState extends State<NodeCapture> {
   
   Widget _buildActionButton() {
     // In edit mode, we can save changes even without recording a new video
-    bool canSaveEdits = _isEditMode && _selectedPosition != null && _nodeNameController.text.isNotEmpty;
+    bool canSaveEdits = _isEditMode && 
+                       _selectedPosition != null && 
+                       _nodeNameController.text.isNotEmpty;
+    
+    // For new nodes or when updating with new video, also require the direction
+    bool readyToRecord = !_isEditMode && 
+                        _selectedPosition != null && 
+                        _nodeNameController.text.isNotEmpty && 
+                        _capturedDirection != null;
     
     return ActionButton(
       isVideoLoaded: _isVideoLoaded,
       onVideoLoaded: _processVideo,
       buttonText: _isEditMode ? 'Update Node' : 'Process Video', // Change button text based on mode
-      isNamedPositionSelected: _nodeNameController.text.isNotEmpty && _selectedPosition != null,
+      isNamedPositionSelected: readyToRecord || canSaveEdits,
       onLaunchCamera: _recordVideoWithNativeCamera,
       onResetVideo: _videoFile != null ? () {
         setState(() {
