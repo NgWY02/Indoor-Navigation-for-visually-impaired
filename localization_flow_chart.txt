@@ -1,0 +1,44 @@
+[START] → Initialize App
+    ↓
+Activate Camera
+    ↓
+Load TF Model & Stored Embeddings
+    ↓
+[PROCESS] → Capture Frame (1 per second)
+    ↓
+Preprocess Image (Resize & Normalize)
+    ↓
+Extract Features Using TF Model
+    ↓
+Compare With Stored Embeddings
+    ↓
+[DECISION] → Similarity > 0.7?
+    ↙       ↘
+   No       Yes
+    ↓        ↓
+Display     Update UI with 
+"Unknown"   Location Name
+    ↓        ↓
+    ↓     Read Compass Heading
+    ↓        ↓
+    ↓     Calculate Angle Difference 
+    ↓     With Reference Direction
+    ↓        ↓
+    ↓     Generate Directional Guidance
+    ↓        ↓
+    ↓     [DECISION] → Direction Changed?
+    ↓        ↙       ↘
+    ↓       No       Yes
+    ↓        ↓        ↓
+    ↓     Continue   Provide Haptic & 
+    ↓                Voice Feedback
+    ↓                  ↓
+    ↓←←←←←←←←←←←←←←←←←←↓
+    ↓
+[DECISION] → App Still Active?
+    ↙       ↘
+   No       Yes
+    ↓        ↓
+  [END]      ↑
+             ↑
+             ↑←←←←←←←←←↑ 
