@@ -86,7 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 32),
                   const Text(
-                    'Indoor Navigation',
+                    'Indoor Navigation for Visually Impaired',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 24,
