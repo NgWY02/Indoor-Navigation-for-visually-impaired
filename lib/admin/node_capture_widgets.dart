@@ -747,7 +747,7 @@ class DirectionCaptureView extends StatelessWidget {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    '1. Stand still and face the location',
+                    '1. Stand still and face the main entrance',
                     style: TextStyle(fontSize: 14),
                   ),
                   SizedBox(height: 4),
@@ -899,7 +899,7 @@ class VideoInstructionsView extends StatelessWidget {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    '1. Stand at the exact location you marked on the map',
+                    '1. Stand 5 meters away from the main entrance you marked on the map ',
                     style: TextStyle(fontSize: 14),
                   ),
                   SizedBox(height: 4),
