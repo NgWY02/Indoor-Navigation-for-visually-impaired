@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'recognition_screen.dart';
+import 'navigation_localization.dart';
 import 'profile_screen.dart';
 import 'services/supabase_service.dart';
 import 'services/ui_helper.dart';
@@ -87,6 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadUserRole();
     _screens = [
       RecognitionScreen(camera: widget.cameras.first),
+      NavigationLocalizationScreen(camera: widget.cameras.first),
       const ProfileScreen(),
     ];
   }
@@ -126,9 +128,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: 'Recognize',
               ),
               BottomNavigationBarItem(
+                icon: Icon(Icons.navigation),
+                label: 'Navigation',
+              ),
+              BottomNavigationBarItem(
                 icon: Icon(Icons.person),
                 label: 'Profile',
-                ),
+              ),
               // Admin tab removed from bottom navigation
             ],
           ),
