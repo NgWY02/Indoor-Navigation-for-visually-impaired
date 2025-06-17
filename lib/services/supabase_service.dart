@@ -731,7 +731,6 @@ class SupabaseService {
               .update({
                 'place_name': placeName, // Update name in case it changed
                 'embedding': jsonEncode(embedding),
-                'updated_at': DateTime.now().toIso8601String(),
                 'user_id': userId, // Update user_id in case ownership changes (optional)
               })
               .eq('node_id', nodeId)

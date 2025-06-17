@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/supabase_service.dart';
 import 'node_capture.dart';
-import 'map_details_screen.dart'; // Add this import
+import 'map_details_screen.dart'; 
 
 class MapManagement extends StatefulWidget {
   const MapManagement({Key? key}) : super(key: key);

@@ -28,7 +28,7 @@ class _NodeCaptureState extends State<NodeCapture> {
   final ImagePicker _picker = ImagePicker();
   
   // Services
-  final SupabaseService _supabaseService = SupabaseService();
+  late SupabaseService _supabaseService;
   late MapService _mapService;
   late VideoProcessorService _videoProcessorService;
   
@@ -55,8 +55,8 @@ class _NodeCaptureState extends State<NodeCapture> {
   // New state variable for current view
   int _currentStep = 1; // 1: Map/Name, 2: Direction, 3: Video
   
-  // Map loading
-  late Future<Map<String, dynamic>> _mapFuture;
+  // Data
+  late Future<Map<String, dynamic>>? _mapFuture;
   
   @override
   void initState() {
@@ -65,26 +65,46 @@ class _NodeCaptureState extends State<NodeCapture> {
     // Check if we're in edit mode
     _isEditMode = widget.nodeId != null;
     
-    // Initialize services
+    // Services
+    _supabaseService = SupabaseService();
     _mapService = MapService(_supabaseService);
     _videoProcessorService = VideoProcessorService(_supabaseService);
     
-    // Initialize data
-    _mapFuture = _mapService.loadMapDetails(widget.mapId);
-    _videoProcessorService.loadModel();
+    // Initialize map future immediately to avoid late initialization error
+    _mapFuture = _supabaseService.getMapDetails(widget.mapId);
     
-    // If editing, load existing node data
-    if (_isEditMode) {
-      _loadExistingNodeData();
-    }
-
+    // Load the model and additional data asynchronously
+    _initializeModelAndData();
+    
     // Add listener to update UI when text changes
     _nodeNameController.addListener(() {
       setState(() {});
     });
     
-    // Request location permission for compass on Android
+    // Request location permission for compass
     _requestLocationPermission();
+  }
+  
+  Future<void> _initializeModelAndData() async {
+    try {
+      print('NodeCapture: Initializing model and loading data...');
+      
+      // Load the model first
+      await _videoProcessorService.loadModel();
+      print('NodeCapture: Model loaded successfully');
+      
+      // If editing, load the node data
+      if (_isEditMode) {
+        await _loadNodeData();
+      }
+    } catch (e) {
+      print('NodeCapture: Error during initialization: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Initialization error: $e')),
+        );
+      }
+    }
   }
   
   // Request location permission for compass on Android
@@ -95,7 +115,7 @@ class _NodeCaptureState extends State<NodeCapture> {
   }
   
   // Load existing node data when in edit mode
-  Future<void> _loadExistingNodeData() async {
+  Future<void> _loadNodeData() async {
     if (!_isEditMode) return;
     
     setState(() {
@@ -405,13 +425,34 @@ class _NodeCaptureState extends State<NodeCapture> {
               : FutureBuilder<Map<String, dynamic>>(
                   future: _mapFuture,
                   builder: (context, snapshot) {
+                    // Handle case where _mapFuture might be null during initialization
+                    if (_mapFuture == null) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const Center(child: CircularProgressIndicator());
                     }
                     
                     if (snapshot.hasError) {
                       return Center(
-                        child: Text('Error: ${snapshot.error}'),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error, size: 48, color: Colors.red),
+                            const SizedBox(height: 16),
+                            Text('Error loading map: ${snapshot.error}'),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: () {
+                                setState(() {
+                                  _mapFuture = _supabaseService.getMapDetails(widget.mapId);
+                                });
+                              },
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
                       );
                     }
                     

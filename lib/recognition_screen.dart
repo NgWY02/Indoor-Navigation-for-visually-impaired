@@ -240,7 +240,23 @@ class _RecognitionScreenState extends State<RecognitionScreen> {
   }
   
   Future<void> _loadModel() async {
-    _interpreter = await Interpreter.fromAsset('assets/models/feature_extractor.tflite');
+    try {
+      _interpreter = await Interpreter.fromAsset('assets/models/feature_extractor.tflite');
+      print('TensorFlow Lite model loaded successfully');
+    } catch (e) {
+      print('Error loading TensorFlow Lite model: $e');
+      
+      // Show user-friendly error message
+      if (mounted) {
+        setState(() {
+          _recognizedPlace = "Model loading failed";
+          _isLoading = false;
+        });
+      }
+      
+      // You might want to show a dialog or handle this differently
+      throw Exception('Failed to load TensorFlow Lite model: $e');
+    }
   }
   
   Future<void> _loadEmbeddingsFromSupabase() async {

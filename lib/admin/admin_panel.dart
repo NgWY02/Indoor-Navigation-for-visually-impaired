@@ -10,7 +10,7 @@ class AdminPanel extends StatefulWidget {
 }
 
 class _AdminPanelState extends State<AdminPanel> {
-  final SupabaseService _supabaseService = SupabaseService();
+  final SupabaseService _supabaseService = SupabaseService(); 
   List<Map<String, dynamic>> _users = [];
   bool _isLoading = true;
   String? _errorMessage;
