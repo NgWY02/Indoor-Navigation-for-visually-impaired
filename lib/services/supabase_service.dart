@@ -852,4 +852,117 @@ class SupabaseService {
       return {};
     }
   }
+
+  // Navigation Connection Methods
+  Future<String> createNodeConnection({
+    required String mapId,
+    required String nodeAId,
+    required String nodeBId,
+    double? distanceMeters,
+    int? steps,
+    double? averageHeading,
+    String? customInstruction,
+    List<Map<String, dynamic>>? confirmationObjects,
+  }) async {
+    try {
+      final String connectionId = uuid.v4();
+      await client.from('node_connections').insert({
+        'id': connectionId,
+        'map_id': mapId,
+        'node_a_id': nodeAId,
+        'node_b_id': nodeBId,
+        'distance_meters': distanceMeters,
+        'steps': steps,
+        'average_heading': averageHeading,
+        'custom_instruction': customInstruction,
+        'confirmation_objects': confirmationObjects != null ? jsonEncode(confirmationObjects) : null,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return connectionId;
+    } catch (e) {
+      print('Error creating node connection: $e');
+      throw Exception('Failed to create node connection: ${e.toString()}');
+    }
+  }
+
+  Future<bool> updateNodeConnection({
+    required String connectionId,
+    int? steps,
+    double? distanceMeters,
+    double? averageHeading,
+    List<Map<String, dynamic>>? confirmationObjects,
+  }) async {
+    try {
+      await client.from('node_connections').update({
+        'steps': steps,
+        'distance_meters': distanceMeters,
+        'average_heading': averageHeading,
+        'confirmation_objects': confirmationObjects != null ? jsonEncode(confirmationObjects) : null,
+      }).eq('id', connectionId);
+      return true;
+    } catch (e) {
+      print('Error updating node connection: $e');
+      return false;
+    }
+  }
+
+  Future<void> deleteNodeConnection(String connectionId) async {
+    try {
+      await client.from('node_connections').delete().eq('id', connectionId);
+    } catch (e) {
+      print('Error deleting node connection: $e');
+      throw Exception('Failed to delete node connection: ${e.toString()}');
+    }
+  }
+
+  Future<Map<String, dynamic>> getNavigationData(String mapId) async {
+    try {
+      final nodes = await client.from('map_nodes').select('*').eq('map_id', mapId);
+      final connections = await client.from('node_connections').select('*').eq('map_id', mapId);
+      return {'nodes': nodes, 'connections': connections};
+    } catch (e) {
+      print('Error getting navigation data: $e');
+      throw Exception('Failed to get navigation data: ${e.toString()}');
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getWalkingSessions(String mapId) async {
+    try {
+      return await client.from('walking_sessions').select('*').eq('map_id', mapId);
+    } catch (e) {
+      print('Error getting walking sessions: $e');
+      throw Exception('Failed to get walking sessions: ${e.toString()}');
+    }
+  }
+
+  Future<String> saveWalkingSession({
+    required String mapId,
+    required String startNodeId,
+    required String endNodeId,
+    required double distanceMeters,
+    required int stepCount,
+    required double averageHeading,
+    required String instruction,
+    required List<Map<String, dynamic>> detectedObjects,
+  }) async {
+    try {
+      final String sessionId = uuid.v4();
+      await client.from('walking_sessions').insert({
+        'id': sessionId,
+        'map_id': mapId,
+        'start_node_id': startNodeId,
+        'end_node_id': endNodeId,
+        'distance_meters': distanceMeters,
+        'step_count': stepCount,
+        'average_heading': averageHeading,
+        'instruction': instruction,
+        'detected_objects': jsonEncode(detectedObjects),
+        'created_at': DateTime.now().toIso8601String(),
+      });
+      return sessionId;
+    } catch (e) {
+      print('Error saving walking session: $e');
+      throw Exception('Failed to save walking session: ${e.toString()}');
+    }
+  }
 }
