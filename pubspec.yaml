@@ -10,21 +10,25 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  camera: ^0.10.5+2
-  tflite_flutter: ^0.10.4
-  image: ^4.0.17
-  path_provider: ^2.0.15
-  image_picker: ^1.0.4
-  supabase_flutter: ^2.8.4
-  uuid: ^4.1.0
-  video_player: ^2.9.5
+  camera: ^0.11.1
+  tflite_flutter: ^0.11.0
+  image: ^4.2.0
+  path_provider: ^2.1.3
+  image_picker: ^1.1.2
+  supabase_flutter: ^2.5.6
+  uuid: ^4.4.0
+  video_player: ^2.8.6
   video_thumbnail: ^0.5.3
-  path: ^1.8.3
-  flutter_compass: ^0.8.1
-  permission_handler: ^12.0.0+1
-  flutter_tts: ^4.2.2
+  path: ^1.9.0
+  flutter_compass: ^0.8.0
+  permission_handler: ^11.3.1
+  flutter_tts: ^4.0.2
+  pedometer: ^4.1.1
+  sensors_plus: ^6.1.1
+  collection: ^1.18.0
   
 flutter:
   uses-material-design: true
   assets:
-    - assets/models/feature_extractor.tflite
+    - assets/models/                            # Include entire models directory
+    - assets/models/feature_extractor.tflite    # MobileNetV2 for place recognition
