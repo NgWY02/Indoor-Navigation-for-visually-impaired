@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import '../services/supabase_service.dart';
 import 'map_service.dart';
-import 'video_processor_service.dart';
 import 'node_capture_widgets.dart';
 
 class NodeCapture extends StatefulWidget {
@@ -30,13 +30,11 @@ class _NodeCaptureState extends State<NodeCapture> {
   // Services
   late SupabaseService _supabaseService;
   late MapService _mapService;
-  late VideoProcessorService _videoProcessorService;
   
   // State variables
   Offset? _selectedPosition;
   double _imageScale = 1.0;
   Offset _imageOffset = Offset.zero;
-  bool _readyForCameraView = false;
   bool _isProcessingVideo = false;
   double _processingProgress = 0.0;
   String _processingMessage = '';
@@ -47,7 +45,6 @@ class _NodeCaptureState extends State<NodeCapture> {
   // New state variables for edit mode
   bool _isEditMode = false;
   bool _isLoadingNodeData = false;
-  Map<String, dynamic>? _existingNodeData;
   
   // New state variable for direction
   double? _capturedDirection;
@@ -68,13 +65,12 @@ class _NodeCaptureState extends State<NodeCapture> {
     // Services
     _supabaseService = SupabaseService();
     _mapService = MapService(_supabaseService);
-    _videoProcessorService = VideoProcessorService(_supabaseService);
     
     // Initialize map future immediately to avoid late initialization error
     _mapFuture = _supabaseService.getMapDetails(widget.mapId);
     
-    // Load the model and additional data asynchronously
-    _initializeModelAndData();
+    // Load additional data asynchronously
+    _initializeData();
     
     // Add listener to update UI when text changes
     _nodeNameController.addListener(() {
@@ -85,13 +81,9 @@ class _NodeCaptureState extends State<NodeCapture> {
     _requestLocationPermission();
   }
   
-  Future<void> _initializeModelAndData() async {
+  Future<void> _initializeData() async {
     try {
-      print('NodeCapture: Initializing model and loading data...');
-      
-      // Load the model first
-      await _videoProcessorService.loadModel();
-      print('NodeCapture: Model loaded successfully');
+      print('NodeCapture: Loading data...');
       
       // If editing, load the node data
       if (_isEditMode) {
@@ -128,8 +120,6 @@ class _NodeCaptureState extends State<NodeCapture> {
       
       if (mounted) {
         setState(() {
-          _existingNodeData = nodeData;
-          
           // Set node name in text controller
           _nodeNameController.text = nodeData['name'] ?? '';
           
@@ -140,9 +130,6 @@ class _NodeCaptureState extends State<NodeCapture> {
           
           // Set reference direction if available
           _capturedDirection = (nodeData['reference_direction'] as num?)?.toDouble();
-          
-          // In edit mode, we're ready to record right away if needed
-          _readyForCameraView = true;
           
           _isLoadingNodeData = false;
         });
@@ -163,20 +150,29 @@ class _NodeCaptureState extends State<NodeCapture> {
   // Capture current direction from compass
   Future<void> _captureEntranceDirection() async {
     try {
-      await _videoProcessorService.captureEntranceDirection();
-      setState(() {
-        _capturedDirection = _videoProcessorService.entranceDirection;
-      });
-      
-      // Show feedback for 1 second
-      if (mounted && _capturedDirection != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Direction captured: ${_capturedDirection!.toStringAsFixed(1)}°'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 1),
-          ),
-        );
+      // Get current compass heading
+      if (FlutterCompass.events != null) {
+        final CompassEvent? event = await FlutterCompass.events!.first;
+        if (event?.heading != null) {
+          setState(() {
+            _capturedDirection = event!.heading;
+          });
+          
+          // Show feedback for 1 second
+          if (mounted && _capturedDirection != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Direction captured: ${_capturedDirection!.toStringAsFixed(1)}°'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 1),
+              ),
+            );
+          }
+        } else {
+          throw Exception('Unable to get compass reading');
+        }
+      } else {
+        throw Exception('Compass not available on this device');
       }
     } catch (e) {
       debugPrint('Error capturing direction: $e');
@@ -205,7 +201,6 @@ class _NodeCaptureState extends State<NodeCapture> {
       if (pickedFile != null) {
         setState(() {
           _videoFile = pickedFile;
-          _readyForCameraView = false; // Ready for preview/process
         });
         await _initializeVideoPlayer(); // Initialize preview
       } else {
@@ -269,39 +264,53 @@ class _NodeCaptureState extends State<NodeCapture> {
     
     setState(() {
       _isProcessingVideo = true;
+      _processingProgress = 0.0;
+      _processingMessage = 'Creating location node...';
     });
     
-    await _videoProcessorService.processVideo(
-      videoFile: _videoFile!,
-      videoPlayerController: _videoPlayerController!,
-      nodeName: _nodeNameController.text.trim(),
-      mapId: widget.mapId,
-      positionX: _selectedPosition!.dx,
-      positionY: _selectedPosition!.dy,
-      nodeId: widget.nodeId, // Pass nodeId if editing
-      referenceDirection: _capturedDirection, // Pass captured direction
-      onProgressUpdate: (progress, message) {
-        if (mounted) {
-          setState(() {
-            _processingProgress = progress;
-            _processingMessage = message;
-          });
-        }
-      },
-    );
-    
-    if (!mounted) return; 
-
-    // Set completion message
-    setState(() {
-      _processingMessage = _isEditMode ? 'Node updated successfully!' : 'Node created successfully!';
-      _processingProgress = 1.0;
-    });
-
-    // Go back to map screen after a delay
-    await Future.delayed(const Duration(seconds: 3));
-    if (mounted) {
-      Navigator.of(context).pop(true); // Return true to indicate success
+    try {
+      // Create or update the node with basic information
+      if (widget.nodeId != null) {
+        print('NodeCapture: Updating existing node: ${widget.nodeId}');
+        await _supabaseService.updateMapNode(
+          widget.nodeId!, 
+          _nodeNameController.text.trim(), 
+          _selectedPosition!.dx, 
+          _selectedPosition!.dy,
+          referenceDirection: _capturedDirection,
+        );
+        print('NodeCapture: Node ${widget.nodeId} updated successfully');
+      } else {
+        print('NodeCapture: Creating new node');
+        final nodeId = await _supabaseService.createMapNode(
+          widget.mapId, 
+          _nodeNameController.text.trim(), 
+          _selectedPosition!.dx, 
+          _selectedPosition!.dy,
+          referenceDirection: _capturedDirection,
+        );
+        print('NodeCapture: Node $nodeId created successfully');
+      }
+      
+      setState(() {
+        _processingProgress = 1.0;
+        _processingMessage = _isEditMode ? 'Node updated successfully!' : 'Node created successfully!\n\nNote: For location recognition, use the main app\'s 360° SmolVLM scan feature.';
+      });
+      
+      // Go back to map screen after a delay
+      await Future.delayed(const Duration(seconds: 3));
+      if (mounted) {
+        Navigator.of(context).pop(true); // Return true to indicate success
+      }
+    } catch (e) {
+      setState(() {
+        _isProcessingVideo = false;
+      });
+      
+      print("ERROR creating/updating node: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e')),
+      );
     }
   }
   
@@ -398,7 +407,6 @@ class _NodeCaptureState extends State<NodeCapture> {
   void dispose() {
     _nodeNameController.dispose();
     _videoPlayerController?.dispose();
-    _videoProcessorService.dispose();
     super.dispose();
   }
 

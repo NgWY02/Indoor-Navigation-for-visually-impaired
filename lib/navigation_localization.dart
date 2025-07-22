@@ -12,7 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 import 'services/supabase_service.dart';
-import 'package:flutter/foundation.dart'; // Added for mapEquals
+import 'package:flutter/foundation.dart'; 
 
 // Utility function for reshaping lists (from navigation_screen)
 List reshapeList(List inputList, List<int> shape) {
