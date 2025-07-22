@@ -866,6 +866,12 @@ class SupabaseService {
   }) async {
     try {
       final String connectionId = uuid.v4();
+      final userId = currentUser?.id;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+      
       await client.from('node_connections').insert({
         'id': connectionId,
         'map_id': mapId,
@@ -877,6 +883,7 @@ class SupabaseService {
         'custom_instruction': customInstruction,
         'confirmation_objects': confirmationObjects != null ? jsonEncode(confirmationObjects) : null,
         'created_at': DateTime.now().toIso8601String(),
+        'user_id': userId,
       });
       return connectionId;
     } catch (e) {
@@ -947,6 +954,12 @@ class SupabaseService {
   }) async {
     try {
       final String sessionId = uuid.v4();
+      final userId = currentUser?.id;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+      
       await client.from('walking_sessions').insert({
         'id': sessionId,
         'map_id': mapId,
@@ -958,11 +971,39 @@ class SupabaseService {
         'instruction': instruction,
         'detected_objects': jsonEncode(detectedObjects),
         'created_at': DateTime.now().toIso8601String(),
+        'user_id': userId,
       });
       return sessionId;
     } catch (e) {
       print('Error saving walking session: $e');
       throw Exception('Failed to save walking session: ${e.toString()}');
+    }
+  }
+
+  // Path Recording Methods
+  Future<String> saveRecordedPath(Map<String, dynamic> pathData) async {
+    try {
+      final String pathId = uuid.v4();
+      final userId = currentUser?.id;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+      
+      // Prepare the path data with additional fields
+      final Map<String, dynamic> completePathData = {
+        'id': pathId,
+        'user_id': userId,
+        'created_at': DateTime.now().toIso8601String(),
+        ...pathData, // Spread the provided path data
+      };
+      
+      await client.from('recorded_paths').insert(completePathData);
+      print('Recorded path saved with ID: $pathId');
+      return pathId;
+    } catch (e) {
+      print('Error saving recorded path: $e');
+      throw Exception('Failed to save recorded path: ${e.toString()}');
     }
   }
 }
