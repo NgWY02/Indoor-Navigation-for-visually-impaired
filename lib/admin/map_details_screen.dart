@@ -3,6 +3,7 @@ import '../services/supabase_service.dart';
 import 'node_capture.dart'; // Import NodeCapture screen
 import 'map_service.dart'; // Import MapService for image loading
 import 'dart:ui' as ui;
+import 'dart:math';
 
 class MapDetailsScreen extends StatefulWidget {
   final String mapId;
@@ -15,35 +16,40 @@ class MapDetailsScreen extends StatefulWidget {
 
 class _MapDetailsScreenState extends State<MapDetailsScreen> {
   final SupabaseService _supabaseService = SupabaseService();
-  late MapService _mapService; // Remove final keyword to allow reassignment
+  late MapService _mapService;
   late Future<Map<String, dynamic>> _mapDetailsFuture;
-  Map<String, dynamic>? _currentMapData; // Store current map data
+  Map<String, dynamic>? _currentMapData;
+  
+  // Connection mode state
+  bool _isConnectionMode = false;
+  String? _selectedStartNodeId;
+  String? _selectedEndNodeId;
+  List<Map<String, dynamic>> _connections = [];
+  bool _isLoadingConnections = false;
 
   @override
   void initState() {
     super.initState();
-    _mapService = MapService(SupabaseService()); // Initialize here
+    _mapService = MapService(SupabaseService());
     _loadMapDetails();
+    _loadConnections();
   }
 
   void _loadMapDetails() {
-    // Clear any cached data
-    _mapService = MapService(SupabaseService()); // Re-initialize map service
+    _mapService = MapService(SupabaseService());
     
-    // Add no-cache options to force fresh data
     print('Fetching fresh map details for map ID: ${widget.mapId}');
     _mapDetailsFuture = _supabaseService.getMapDetails(widget.mapId);
     
-    // Also load the map image using MapService
     _mapDetailsFuture.then((data) {
       print('Map details loaded with ${data['map_nodes']?.length ?? 0} nodes');
       if (mounted) {
         setState(() {
-          _currentMapData = data; // Store data for easy access
+          _currentMapData = data;
         });
         _mapService.loadMapImage(data['image_url'], context).then((success) {
           if (success && mounted) {
-            setState(() {}); // Trigger rebuild when image is loaded
+            setState(() {});
             print('Map image loaded successfully');
           }
         });
@@ -58,21 +64,45 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     });
   }
 
+  Future<void> _loadConnections() async {
+    setState(() {
+      _isLoadingConnections = true;
+    });
+    
+    try {
+      final navigationData = await _supabaseService.getNavigationData(widget.mapId);
+      if (mounted) {
+        setState(() {
+          _connections = List<Map<String, dynamic>>.from(navigationData['connections'] ?? []);
+          _isLoadingConnections = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading connections: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingConnections = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading connections: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _navigateToNodeCapture({String? nodeId}) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => NodeCapture(
           mapId: widget.mapId,
-          nodeId: nodeId, // Pass nodeId for editing, null for creating new
+          nodeId: nodeId,
         ),
       ),
     );
     
-    // Refresh map details if node was added/edited
     if (result == true && mounted) {
       print("Node edit/add successful (result=true). Triggering refresh...");
-      // Simply call _loadMapDetails which handles re-initialization and fetching
       _loadMapDetails(); 
     }
   }
@@ -106,7 +136,8 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
            ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Node "$nodeName" deleted successfully.')),
           );
-          _loadMapDetails(); // Refresh the list
+          _loadMapDetails();
+          _loadConnections(); // Refresh connections as well
         }
       } catch (e) {
          if (mounted) {
@@ -118,8 +149,176 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     }
   }
 
+  void _toggleConnectionMode() {
+    setState(() {
+      _isConnectionMode = !_isConnectionMode;
+      _selectedStartNodeId = null;
+      _selectedEndNodeId = null;
+    });
+  }
+
+  void _onNodeTapped(String nodeId, String nodeName) {
+    if (!_isConnectionMode) return;
+
+    setState(() {
+      if (_selectedStartNodeId == null) {
+        _selectedStartNodeId = nodeId;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Start node selected: $nodeName. Now select destination node.'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      } else if (_selectedEndNodeId == null && nodeId != _selectedStartNodeId) {
+        _selectedEndNodeId = nodeId;
+        _showConnectionDialog();
+      } else if (nodeId == _selectedStartNodeId) {
+        _selectedStartNodeId = null;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connection cancelled. Select start node again.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    });
+  }
+
+  void _showConnectionDialog() {
+    final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
+    final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
+    
+    showDialog(
+      context: context,
+      builder: (context) => ConnectionDialog(
+        startNodeName: startNode['name'],
+        endNodeName: endNode['name'],
+        onCreateBasic: () async {
+          await _createConnection(null, null, null);
+        },
+        onRecordPath: () async {
+          Navigator.of(context).pop(); // Close dialog first
+          await _startPathRecording();
+        },
+      ),
+    );
+  }
+
+  Future<void> _createConnection(double? distance, int? steps, String? instruction) async {
+    try {
+      await _supabaseService.createNodeConnection(
+        mapId: widget.mapId,
+        nodeAId: _selectedStartNodeId!,
+        nodeBId: _selectedEndNodeId!,
+        distanceMeters: distance,
+        steps: steps,
+        customInstruction: instruction,
+      );
+      
+      if (mounted) {
+        setState(() {
+          _selectedStartNodeId = null;
+          _selectedEndNodeId = null;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connection created successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        
+        _loadConnections();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error creating connection: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteConnection(String connectionId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Confirm Deletion'),
+          content: const Text('Are you sure you want to delete this connection? This action cannot be undone.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true) {
+      try {
+        await _supabaseService.deleteNodeConnection(connectionId);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Connection deleted successfully.')),
+          );
+          _loadConnections();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error deleting connection: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _startPathRecording() async {
+    if (_selectedStartNodeId == null || _selectedEndNodeId == null) return;
+    
+    // Get node details for the recording
+    final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
+    final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
+    
+    // Show a placeholder message for path recording
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Path recording from ${startNode['name']} to ${endNode['name']} will be implemented later'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+    
+    // Reset selection for now
+    if (mounted) {
+      setState(() {
+        _selectedStartNodeId = null;
+        _selectedEndNodeId = null;
+      });
+      _loadConnections();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Path recorded successfully!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final isTablet = screenSize.width > 600;
+    
     return Scaffold(
       appBar: AppBar(
         title: FutureBuilder<Map<String, dynamic>>(
@@ -133,10 +332,15 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
         ),
         actions: [
           IconButton(
+            icon: Icon(_isConnectionMode ? Icons.link_off : Icons.link),
+            tooltip: _isConnectionMode ? 'Exit Connection Mode' : 'Connection Mode',
+            onPressed: _toggleConnectionMode,
+          ),
+          IconButton(
             icon: const Icon(Icons.add_location_alt),
             tooltip: 'Add New Node',
             onPressed: () {
-              _navigateToNodeCapture(); // No nodeId = create new
+              _navigateToNodeCapture();
             },
           ),
         ],
@@ -157,36 +361,79 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           final mapData = snapshot.data!;
           final List<dynamic> nodes = mapData['map_nodes'] ?? [];
 
-          return Column(
-            children: [
-              // Display Map Image with existing nodes
-              if (_mapService.mapUIImage != null)
+          if (isTablet) {
+            // Tablet layout - side by side
+            return Row(
+              children: [
                 Expanded(
                   flex: 2,
-                  child: Container(
+                  child: _buildMapView(nodes, context),
+                ),
+                Expanded(
+                  flex: 1,
+                  child: _buildDetailsPanel(nodes, context),
+                ),
+              ],
+            );
+          } else {
+            // Mobile layout - stacked
+          return Column(
+            children: [
+                if (_isConnectionMode)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12.0),
+                    color: Colors.orange.withOpacity(0.1),
+                    child: Text(
+                      _selectedStartNodeId == null 
+                        ? 'Connection Mode: Tap a node to select start point'
+                        : 'Connection Mode: Tap another node to create connection',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                Expanded(
+                  flex: 2,
+                  child: _buildMapView(nodes, context),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: _buildDetailsPanel(nodes, context),
+                ),
+              ],
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildMapView(List<dynamic> nodes, BuildContext context) {
+    if (_mapService.mapUIImage == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Container(
                     padding: const EdgeInsets.all(8.0),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        // Calculate aspect ratio of the map image
                         final double mapAspectRatio = _mapService.mapUIImage!.width / _mapService.mapUIImage!.height;
                         
-                        // Calculate dimensions based on available width and aspect ratio
                         final containerWidth = constraints.maxWidth;
                         final containerHeight = constraints.maxHeight;
                         
-                        // Determine if we should fit by width or height
                         final double targetWidth, targetHeight;
                         if (containerWidth / containerHeight > mapAspectRatio) {
-                          // Available space is wider than the image aspect ratio
                           targetHeight = containerHeight;
                           targetWidth = containerHeight * mapAspectRatio;
                         } else {
-                          // Available space is taller than the image aspect ratio
                           targetWidth = containerWidth;
                           targetHeight = containerWidth / mapAspectRatio;
                         }
                         
-                        // Calculate scale factors for node positioning
                         final scaleX = targetWidth / _mapService.mapUIImage!.width;
                         final scaleY = targetHeight / _mapService.mapUIImage!.height;
                         
@@ -199,19 +446,21 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                               maxScale: 4.0,
                               child: Stack(
                                 children: [
-                                  // Map image as background
+                    // Map image with connections
                                   SizedBox(
                                     width: targetWidth,
                                     height: targetHeight,
-                                    child: RawImage(
-                                      image: _mapService.mapUIImage!,
-                                      fit: BoxFit.fill,
-                                      width: targetWidth,
-                                      height: targetHeight,
+                      child: CustomPaint(
+                        painter: MapWithConnectionsPainter(
+                          mapImage: _mapService.mapUIImage!,
+                          nodes: nodes,
+                          connections: _connections,
+                        ),
+                        child: Container(),
                                     ),
                                   ),
                                   
-                                  // Draw nodes on the map
+                    // Interactive node markers
                                   for (int i = 0; i < nodes.length; i++) 
                                     _buildNodeMarker(nodes[i], i + 1, scaleX, scaleY),
                                 ],
@@ -221,18 +470,15 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                         );
                       },
                     ),
-                  ),
-                )
-              else
-                const Expanded(
-                  flex: 2,
-                  child: Center(child: CircularProgressIndicator())
-                ),
+    );
+  }
 
-              // List of Nodes
-              Expanded(
-                flex: 3,
-                child: Container(
+  Widget _buildDetailsPanel(List<dynamic> nodes, BuildContext context) {
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          Container(
                   decoration: BoxDecoration(
                     color: Colors.white,
                     boxShadow: [
@@ -247,30 +493,66 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                       topRight: Radius.circular(16.0),
                     ),
                   ),
-                  child: nodes.isEmpty
-                      ? const Center(child: Text('No nodes added to this map yet.'))
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(top: 8.0),
+            child: const TabBar(
+              tabs: [
+                Tab(text: 'Nodes', icon: Icon(Icons.location_on)),
+                Tab(text: 'Connections', icon: Icon(Icons.link)),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _buildNodesTab(nodes),
+                _buildConnectionsTab(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNodesTab(List<dynamic> nodes) {
+    if (nodes.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Text('No nodes added to this map yet.'),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(8.0),
                           itemCount: nodes.length,
                           itemBuilder: (context, index) {
                             final node = nodes[index];
                             final nodeName = node['name'] ?? 'Unnamed Node';
                             final nodeId = node['id'];
 
-                            return ListTile(
+        return Card(
+          margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+          child: ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: Colors.blue,
+              backgroundColor: _isConnectionMode && nodeId == _selectedStartNodeId
+                  ? Colors.orange
+                  : Colors.blue,
                                 child: Text((index + 1).toString()),
                               ),
                               title: Text(nodeName),
-                              trailing: Row(
+            trailing: _isConnectionMode 
+              ? const Icon(Icons.touch_app, color: Colors.orange)
+              : SizedBox(
+                  width: 96,
+                  child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   IconButton(
                                     icon: const Icon(Icons.edit, color: Colors.blue),
                                     tooltip: 'Edit Node',
                                     onPressed: () {
-                                      _navigateToNodeCapture(nodeId: nodeId); // Pass nodeId for editing
+                          _navigateToNodeCapture(nodeId: nodeId);
                                     },
                                   ),
                                   IconButton(
@@ -280,47 +562,122 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                                   ),
                                 ],
                               ),
+                ),
+            onTap: _isConnectionMode 
+              ? () => _onNodeTapped(nodeId, nodeName)
+              : null,
+          ),
                             );
                           },
-                        ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
     );
   }
 
-  // Helper method to build node markers on the map
+  Widget _buildConnectionsTab() {
+    if (_isLoadingConnections) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_connections.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.link_off, size: 48, color: Colors.grey),
+              SizedBox(height: 16),
+              Text('No connections created yet.'),
+              SizedBox(height: 8),
+              Text(
+                'Use Connection Mode to create paths between nodes.',
+                style: TextStyle(color: Colors.grey),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+          );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(8.0),
+      itemCount: _connections.length,
+      itemBuilder: (context, index) {
+        final connection = _connections[index];
+        final nodeA = _currentMapData!['map_nodes'].firstWhere(
+          (node) => node['id'] == connection['node_a_id'],
+          orElse: () => {'name': 'Unknown'},
+        );
+        final nodeB = _currentMapData!['map_nodes'].firstWhere(
+          (node) => node['id'] == connection['node_b_id'],
+          orElse: () => {'name': 'Unknown'},
+        );
+
+        return Card(
+          margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+          child: ListTile(
+            leading: const Icon(Icons.link, color: Colors.blue),
+            title: Text('${nodeA['name']} → ${nodeB['name']}'),
+            subtitle: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (connection['distance_meters'] != null)
+                  Text('Distance: ${connection['distance_meters'].toStringAsFixed(1)}m'),
+                if (connection['steps'] != null)
+                  Text('Steps: ${connection['steps']}'),
+                if (connection['custom_instruction'] != null)
+                  Text('Note: ${connection['custom_instruction']}'),
+              ],
+            ),
+            trailing: IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              tooltip: 'Delete Connection',
+              onPressed: () => _deleteConnection(connection['id']),
+            ),
+            isThreeLine: true,
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildNodeMarker(dynamic node, int index, double scaleX, double scaleY) {
-    // Get original coordinates from database
     final double x = (node['x_position'] as num).toDouble();
     final double y = (node['y_position'] as num).toDouble();
+    final String nodeId = node['id'];
     
-    // Scale coordinates to current view
     final double displayX = x * scaleX;
     final double displayY = y * scaleY;
     
+    bool isSelected = _isConnectionMode && nodeId == _selectedStartNodeId;
+    
     return Positioned(
-      left: displayX - 10, // Adjust for marker center
-      top: displayY - 10,  // Adjust for marker center
+      left: displayX - 15,
+      top: displayY - 15,
+      child: GestureDetector(
+        onTap: () => _onNodeTapped(nodeId, node['name'] ?? 'Node $index'),
       child: Tooltip(
-        message: node['name'] ?? 'Node ${index}',
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            // Circle background
-            Container(
-              width: 20,
-              height: 20,
+          message: node['name'] ?? 'Node $index',
+          child: Container(
+            width: 30,
+            height: 30,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.blue,
+              color: isSelected ? Colors.orange : Colors.blue,
+              border: Border.all(
+                color: Colors.white,
+                width: 2,
               ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
             ),
-            // Node number
-            Text(
+              ],
+            ),
+            child: Center(
+              child: Text(
               '$index',
               style: const TextStyle(
                 color: Colors.white,
@@ -328,19 +685,25 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-          ],
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-// Custom painter to draw map with nodes
-class _MapWithNodesPainter extends CustomPainter {
+// Custom painter for map with connections
+class MapWithConnectionsPainter extends CustomPainter {
   final ui.Image mapImage;
   final List<dynamic> nodes;
+  final List<Map<String, dynamic>> connections;
 
-  _MapWithNodesPainter({required this.mapImage, required this.nodes});
+  MapWithConnectionsPainter({
+    required this.mapImage,
+    required this.nodes,
+    required this.connections,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -352,51 +715,162 @@ class _MapWithNodesPainter extends CustomPainter {
       Paint(),
     );
 
-    // Draw the nodes
-    for (int i = 0; i < nodes.length; i++) {
-      final node = nodes[i];
-      final double x = (node['x_position'] as num).toDouble();
-      final double y = (node['y_position'] as num).toDouble();
-      
-      // Scale coordinates if needed based on image-to-canvas ratio
+    // Scale factors
       final double scaleX = size.width / mapImage.width;
       final double scaleY = size.height / mapImage.height;
-      final double scaledX = x * scaleX;
-      final double scaledY = y * scaleY;
 
-      // Draw a dot for the node
-      canvas.drawCircle(
-        Offset(scaledX, scaledY),
-        8.0, // Radius of the dot
-        Paint()..color = Colors.blue,
+    // Draw connections
+    final connectionPaint = Paint()
+      ..color = Colors.blue.withOpacity(0.7)
+      ..strokeWidth = 3.0
+      ..style = PaintingStyle.stroke;
+
+    for (final connection in connections) {
+      final nodeA = nodes.firstWhere(
+        (node) => node['id'] == connection['node_a_id'],
+        orElse: () => null,
+      );
+      final nodeB = nodes.firstWhere(
+        (node) => node['id'] == connection['node_b_id'],
+        orElse: () => null,
       );
 
-      // Draw the number
-      final textStyle = TextStyle(
-        color: Colors.white,
-        fontSize: 12,
-        fontWeight: FontWeight.bold,
-      );
-      final textSpan = TextSpan(
-        text: '${i + 1}',
-        style: textStyle,
-      );
-      final textPainter = TextPainter(
-        text: textSpan,
-        textDirection: TextDirection.ltr,
-        textAlign: TextAlign.center,
-      );
-      textPainter.layout();
-      textPainter.paint(
-        canvas,
-        Offset(
-          scaledX - textPainter.width / 2,
-          scaledY - textPainter.height / 2,
-        ),
-      );
+      if (nodeA != null && nodeB != null) {
+        final double x1 = (nodeA['x_position'] as num).toDouble() * scaleX;
+        final double y1 = (nodeA['y_position'] as num).toDouble() * scaleY;
+        final double x2 = (nodeB['x_position'] as num).toDouble() * scaleX;
+        final double y2 = (nodeB['y_position'] as num).toDouble() * scaleY;
+
+        canvas.drawLine(
+          Offset(x1, y1),
+          Offset(x2, y2),
+          connectionPaint,
+        );
+
+        // Draw arrow in the middle
+        final double midX = (x1 + x2) / 2;
+        final double midY = (y1 + y2) / 2;
+        final double angle = atan2(y2 - y1, x2 - x1);
+        
+        _drawArrow(canvas, Offset(midX, midY), angle, connectionPaint);
+      }
     }
+  }
+
+  void _drawArrow(Canvas canvas, Offset center, double angle, Paint paint) {
+    const double arrowSize = 8.0;
+    final Path arrowPath = Path();
+    
+    arrowPath.moveTo(
+      center.dx + arrowSize * cos(angle),
+      center.dy + arrowSize * sin(angle),
+      );
+    arrowPath.lineTo(
+      center.dx + arrowSize * cos(angle + 2.5),
+      center.dy + arrowSize * sin(angle + 2.5),
+    );
+    arrowPath.lineTo(
+      center.dx + arrowSize * cos(angle - 2.5),
+      center.dy + arrowSize * sin(angle - 2.5),
+    );
+    arrowPath.close();
+    
+    canvas.drawPath(arrowPath, paint..style = PaintingStyle.fill);
   }
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+}
+
+// Connection dialog widget
+class ConnectionDialog extends StatelessWidget {
+  final String startNodeName;
+  final String endNodeName;
+  final VoidCallback onCreateBasic;
+  final VoidCallback onRecordPath;
+
+  const ConnectionDialog({
+    Key? key,
+    required this.startNodeName,
+    required this.endNodeName,
+    required this.onCreateBasic,
+    required this.onRecordPath,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final screenSize = MediaQuery.of(context).size;
+    final isTablet = screenSize.width > 600;
+    
+    return AlertDialog(
+      title: const Text('Create Connection'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('From: $startNodeName'),
+          Text('To: $endNodeName'),
+          const SizedBox(height: 20),
+          const Text(
+            'How would you like to create this connection?',
+            style: TextStyle(fontWeight: FontWeight.w500),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onRecordPath,
+              icon: const Icon(Icons.directions_walk),
+              label: const Text('Record Path'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+                padding: EdgeInsets.symmetric(
+                  vertical: isTablet ? 16 : 12,
+                  horizontal: 16,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Walk the path and automatically record distance, steps, and objects',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: onCreateBasic,
+              icon: const Icon(Icons.link),
+              label: const Text('Basic Connection'),
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.symmetric(
+                  vertical: isTablet ? 16 : 12,
+                  horizontal: 16,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Create a simple connection without recorded data',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
 }
