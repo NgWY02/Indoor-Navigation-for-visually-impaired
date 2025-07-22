@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/supabase_service.dart';
 import 'node_capture.dart';
-import 'map_details_screen.dart';
-import 'path_recording_screen.dart'; 
+import 'map_details_screen.dart'; 
 
 class MapManagement extends StatefulWidget {
   const MapManagement({Key? key}) : super(key: key);
@@ -208,20 +207,13 @@ class _MapManagementState extends State<MapManagement> {
           mapId: _selectedMap!['id'],
           nodes: nodes,
           onPathSelected: (startNode, endNode) {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => PathRecordingScreen(
-                  mapId: _selectedMap!['id'],
-                  startNodeId: startNode['id'],
-                  endNodeId: endNode['id'],
-                  startNodeName: startNode['name'],
-                  endNodeName: endNode['name'],
-                ),
+            // Show a placeholder message for path recording
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Path recording from ${startNode['name']} to ${endNode['name']} will be implemented later'),
+                duration: Duration(seconds: 3),
               ),
-            ).then((_) {
-              // Refresh map list when returning
-              _loadMaps();
-            });
+            );
           },
         ),
       );

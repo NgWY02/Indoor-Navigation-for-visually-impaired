@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import '../services/supabase_service.dart';
 import 'node_capture.dart'; // Import NodeCapture screen
 import 'map_service.dart'; // Import MapService for image loading
-import 'path_recording_screen.dart'; // Import PathRecordingScreen
 import 'dart:ui' as ui;
 import 'dart:math';
 
@@ -291,22 +290,16 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
     final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
     
-    // Navigate to path recording screen
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PathRecordingScreen(
-          mapId: widget.mapId,
-          startNodeId: _selectedStartNodeId!,
-          endNodeId: _selectedEndNodeId!,
-          startNodeName: startNode['name'],
-          endNodeName: endNode['name'],
-        ),
+    // Show a placeholder message for path recording
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Path recording from ${startNode['name']} to ${endNode['name']} will be implemented later'),
+        duration: Duration(seconds: 3),
       ),
     );
     
-    // If recording was successful, refresh connections and reset selection
-    if (result == true && mounted) {
+    // Reset selection for now
+    if (mounted) {
       setState(() {
         _selectedStartNodeId = null;
         _selectedEndNodeId = null;

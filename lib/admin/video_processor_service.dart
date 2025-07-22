@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as thumb;
 import 'package:image/image.dart' as img;
 import 'package:flutter_compass/flutter_compass.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
 import '../services/supabase_service.dart';
 
 class VideoProcessorService {
@@ -184,7 +185,7 @@ class VideoProcessorService {
                   print('VideoProcessor: Successfully extracted frame $i: $thumbnailPath (${fileSize} bytes) on attempt ${retry + 1}');
                 } else {
                   print('VideoProcessor: Frame $i file too small (${fileSize} bytes), retrying...');
-                  await frameFile.delete().catchError((_) {}); // Clean up small file
+                  await frameFile.delete().catchError((_) => frameFile); // Clean up small file
                 }
               } else {
                 print('VideoProcessor: Frame $i path returned but file does not exist: $thumbnailPath');
@@ -440,7 +441,7 @@ class VideoProcessorService {
       print('VideoProcessor: Prepared input tensor');
       
       // Prepare output buffer (1, 1280) for MobileNetV2
-      var output = List.filled(1 * 1280, 0.0).reshape([1, 1280]);
+      var output = List.generate(1, (_) => List<double>.filled(1280, 0.0));
       
       // Run inference
       print('VideoProcessor: Running model inference');
