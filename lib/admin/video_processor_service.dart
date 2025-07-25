@@ -4,15 +4,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as thumb;
-import 'package:image/image.dart' as img;
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
 import '../services/supabase_service.dart';
+import '../services/clip_service.dart';
 
 class VideoProcessorService {
   final SupabaseService _supabaseService;
-  late Interpreter _interpreter;
-  bool _isModelLoaded = false;
+  final ClipService _clipService;
+  bool _isClipServerReady = false;
 
   // Processing state
   bool isProcessingVideo = false;
@@ -24,7 +23,7 @@ class VideoProcessorService {
   double? entranceDirection;
   Stream<CompassEvent>? compassStream;
   
-  VideoProcessorService(this._supabaseService) {
+  VideoProcessorService(this._supabaseService) : _clipService = ClipService() {
     // Initialize the compass stream if available on the device
     compassStream = FlutterCompass.events;
   }
@@ -53,16 +52,22 @@ class VideoProcessorService {
     debugPrint('Captured entrance direction: $entranceDirection°');
   }
   
+  // Check if CLIP server is ready instead of loading TFLite model
   Future<void> loadModel() async {
     try {
-      print('VideoProcessor: Starting model loading...');
-      _interpreter = await Interpreter.fromAsset('assets/models/feature_extractor.tflite');
-      _isModelLoaded = true;
-      print('VideoProcessor: Model loaded successfully');
+      print('VideoProcessor: Checking CLIP server availability...');
+      _isClipServerReady = await _clipService.isServerAvailable();
+      
+      if (_isClipServerReady) {
+        print('VideoProcessor: CLIP server is ready');
+      } else {
+        print('VideoProcessor: CLIP server is not available. Please start the server.');
+        throw Exception('CLIP server is not available. Please start the CLIP server first.');
+      }
     } catch (e) {
-      print('VideoProcessor: Error loading model: $e');
-      _isModelLoaded = false;
-      throw Exception('Failed to load TensorFlow Lite model: $e');
+      print('VideoProcessor: Error checking CLIP server: $e');
+      _isClipServerReady = false;
+      throw Exception('Failed to connect to CLIP server: $e');
     }
   }
   
@@ -78,13 +83,13 @@ class VideoProcessorService {
     double? referenceDirection, // Add optional reference direction
   }) async {
     print('VideoProcessor: Starting video processing...');
-    print('VideoProcessor: Model loaded: $_isModelLoaded');
+    print('VideoProcessor: CLIP server ready: $_isClipServerReady');
     print('VideoProcessor: Video file path: ${videoFile.path}');
     print('VideoProcessor: Video exists: ${await File(videoFile.path).exists()}');
     
-    if (!_isModelLoaded) {
-      print('VideoProcessor: Model not loaded, cannot process video');
-      onProgressUpdate(0.0, 'Error: Model not loaded.');
+    if (!_isClipServerReady) {
+      print('VideoProcessor: CLIP server not ready, cannot process video');
+      onProgressUpdate(0.0, 'Error: CLIP server not available.');
       return;
     }
 
@@ -356,12 +361,13 @@ class VideoProcessorService {
           
           print('VideoProcessor: Embedding extracted, length: ${embedding.length}');
           
-          // Save to Supabase
+          // Save to Supabase - Force create new embedding for each frame (360-degree video)
           print('VideoProcessor: Saving embedding to database');
           final id = await _supabaseService.saveEmbedding(
             frameNodeName, 
             embedding,
-            nodeId: finalNodeId // Pass finalNodeId to saveEmbedding
+            nodeId: finalNodeId, // Pass finalNodeId to saveEmbedding
+            forceCreate: true, // Force create new embedding for each frame
           );
           
           if (id != null) {
@@ -388,77 +394,35 @@ class VideoProcessorService {
     }
   }
   
+  // Extract CLIP embedding from image file
   Future<List<double>> extractEmbedding(File imageFile) async {
-    print('VideoProcessor: Starting embedding extraction for: ${imageFile.path}');
+    print('VideoProcessor: Starting CLIP embedding extraction for: ${imageFile.path}');
+    
+    if (!_isClipServerReady) {
+      print('VideoProcessor: CLIP server not ready');
+      return List.filled(512, 0.0); // Return zeros if server not ready (CLIP uses 512 dimensions)
+    }
     
     try {
       // Check if file exists
       if (!await imageFile.exists()) {
         print('VideoProcessor: Image file does not exist: ${imageFile.path}');
-        return List.filled(1280, 0.0);
+        return List.filled(512, 0.0);
       }
-      
-      // Read and decode image
-      final bytes = await imageFile.readAsBytes();
-      print('VideoProcessor: Read ${bytes.length} bytes from image file');
-      
-      final img.Image? image = img.decodeImage(bytes);
-      
-      if (image == null) {
-        print('VideoProcessor: Failed to decode image from bytes');
-        return List.filled(1280, 0.0); // Return zeros if image couldn't be decoded
-      }
-      
-      print('VideoProcessor: Decoded image: ${image.width}x${image.height}');
-      
-      // Resize image
-      final resizedImage = img.copyResize(image, width: 224, height: 224);
-      print('VideoProcessor: Resized image to 224x224');
-      
-      // Convert to input tensor (1, 224, 224, 3)
-      var input = List.generate(
-        1,
-        (_) => List.generate(
-          224,
-          (_) => List.generate(
-            224,
-            (_) => List<double>.filled(3, 0),
-          ),
-        ),
-      );
-      
-      // Fill with normalized pixel values
-      for (int y = 0; y < 224; y++) {
-        for (int x = 0; x < 224; x++) {
-          final pixel = resizedImage.getPixel(x, y);
-          // Extract RGB values from Pixel object and normalize
-          input[0][y][x][0] = (pixel.r.toDouble()) / 127.5 - 1; // Red component
-          input[0][y][x][1] = (pixel.g.toDouble()) / 127.5 - 1; // Green component
-          input[0][y][x][2] = (pixel.b.toDouble()) / 127.5 - 1; // Blue component
-        }
-      }
-      
-      print('VideoProcessor: Prepared input tensor');
-      
-      // Prepare output buffer (1, 1280) for MobileNetV2
-      var output = List.generate(1, (_) => List<double>.filled(1280, 0.0));
-      
-      // Run inference
-      print('VideoProcessor: Running model inference');
-      _interpreter.run(input, output);
-      print('VideoProcessor: Model inference complete');
-      
-      final embedding = List<double>.from(output[0]);
-      print('VideoProcessor: Generated embedding with ${embedding.length} dimensions');
+
+      // Use CLIP service to generate embedding
+      final embedding = await _clipService.generateImageEmbedding(imageFile);
+      print('VideoProcessor: Generated CLIP embedding with ${embedding.length} dimensions');
       
       return embedding;
     } catch (e) {
-      print('VideoProcessor: Error in extractEmbedding: $e');
-      return List.filled(1280, 0.0);
+      print('VideoProcessor: Error in CLIP embedding extraction: $e');
+      return List.filled(512, 0.0); // Return zeros on error
     }
   }
   
   void dispose() {
-    _interpreter.close();
+    // CLIP service uses HTTP client which is automatically disposed
+    print('VideoProcessor: Disposing CLIP service resources');
   }
 }

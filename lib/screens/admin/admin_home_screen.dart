@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/responsive_helper.dart';
-import '../../navigation_localization.dart';
+import '../user/navigation_main_screen.dart';
 import '../../admin/map_management.dart';
 import '../common/profile_screen.dart';
 import 'package:camera/camera.dart';
@@ -80,12 +80,12 @@ class AdminHomeScreen extends StatelessWidget {
                         context,
                         icon: Icons.navigation,
                         title: 'Navigation',
-                        subtitle: 'Access navigation system',
+                        subtitle: 'Test navigation system',
                         color: Colors.green,
                         onTap: () {
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (context) => NavigationLocalizationScreen(
+                              builder: (context) => NavigationMainScreen(
                                 camera: cameras.first,
                               ),
                             ),

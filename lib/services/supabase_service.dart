@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as path;
 import 'dart:math';
+import '../models/path_models.dart';
 
 // Define user roles
 enum UserRole {
@@ -715,16 +716,17 @@ class SupabaseService {
   }
 
   // Save embedding to Supabase
-  // Modify to handle updates if nodeId is provided
-  Future<String?> saveEmbedding(String placeName, List<double> embedding, {String? nodeId}) async {
+  // Modified to always create new embeddings for 360-degree videos
+  Future<String?> saveEmbedding(String placeName, List<double> embedding, {String? nodeId, bool forceCreate = false}) async {
     try {
       final userId = currentUser?.id;
       if (userId == null) {
         throw Exception('User not authenticated');
       }
 
-      // If nodeId is provided, try to update existing embedding first
-      if (nodeId != null) {
+      // For 360-degree videos, we want multiple embeddings per node, so always create new ones
+      // Only try to update if explicitly not forced to create and nodeId is provided
+      if (nodeId != null && !forceCreate) {
         try {
           final updateResponse = await client
               .from('place_embeddings')
@@ -750,7 +752,7 @@ class SupabaseService {
         }
       }
 
-      // Create new embedding if nodeId is null or update failed/not found
+      // Create new embedding (default behavior for 360-degree videos)
       final id = uuid.v4();
       Map<String, dynamic> data = {
         'id': id,
@@ -922,6 +924,27 @@ class SupabaseService {
     }
   }
 
+  Future<void> deleteNavigationPath(String pathId) async {
+    try {
+      final userId = currentUser?.id;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // First delete all waypoints for this path
+      await client.from('path_waypoints').delete().eq('path_id', pathId);
+      
+      // Then delete the navigation path itself
+      await client.from('navigation_paths').delete()
+          .eq('id', pathId)
+          .eq('user_id', userId);
+    } catch (e) {
+      print('Error deleting navigation path: $e');
+      throw Exception('Failed to delete navigation path: ${e.toString()}');
+    }
+  }
+
   Future<Map<String, dynamic>> getNavigationData(String mapId) async {
     try {
       final nodes = await client.from('map_nodes').select('*').eq('map_id', mapId);
@@ -981,6 +1004,243 @@ class SupabaseService {
   }
 
   // Path Recording Methods
+  
+  // Save NavigationPath model to database
+  Future<String> savePath(NavigationPath navigationPath) async {
+    try {
+      final userId = currentUser?.id;
+      print('=== savePath() called ===');
+      print('Path name: ${navigationPath.name}');
+      print('Start location ID: ${navigationPath.startLocationId}');
+      print('End location ID: ${navigationPath.endLocationId}');
+      print('Current user ID: $userId');
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+      
+      // First, save the navigation path (without waypoints)
+      final Map<String, dynamic> pathData = {
+        'id': navigationPath.id,
+        'name': navigationPath.name,
+        'start_location_id': navigationPath.startLocationId,
+        'end_location_id': navigationPath.endLocationId,
+        'estimated_distance': navigationPath.estimatedDistance,
+        'estimated_steps': navigationPath.estimatedSteps,
+        'user_id': userId,
+        'created_at': navigationPath.createdAt.toIso8601String(),
+        'updated_at': navigationPath.updatedAt.toIso8601String(),
+      };
+      
+      print('Inserting path data: $pathData');
+      
+      // Insert the navigation path
+      await client.from('navigation_paths').insert(pathData);
+      print('✅ Navigation path saved with ID: ${navigationPath.id}');
+      
+      // Then, save all waypoints separately
+      if (navigationPath.waypoints.isNotEmpty) {
+        final List<Map<String, dynamic>> waypointsData = navigationPath.waypoints.map((waypoint) => {
+          'id': waypoint.id,
+          'path_id': navigationPath.id, // Link to the parent path
+          'sequence_number': waypoint.sequenceNumber,
+          'embedding': waypoint.embedding,
+          'heading': waypoint.heading,
+          'heading_change': waypoint.headingChange,
+          'turn_type': waypoint.turnType.name,
+          'is_decision_point': waypoint.isDecisionPoint,
+          'landmark_description': waypoint.landmarkDescription,
+          'distance_from_previous': waypoint.distanceFromPrevious,
+          'timestamp': waypoint.timestamp.toIso8601String(),
+        }).toList();
+        
+        // Insert all waypoints
+        await client.from('path_waypoints').insert(waypointsData);
+        print('${navigationPath.waypoints.length} waypoints saved for path ${navigationPath.id}');
+      }
+      
+      return navigationPath.id;
+    } catch (e) {
+      print('Error saving navigation path: $e');
+      throw Exception('Failed to save navigation path: ${e.toString()}');
+    }
+  }
+
+  // Load NavigationPath from database by ID
+  Future<NavigationPath?> loadPath(String pathId) async {
+    try {
+      final userId = currentUser?.id;
+      
+      if (userId == null) {
+        throw Exception('User not authenticated');
+      }
+      
+      // First, load the navigation path
+      final pathResponse = await client
+          .from('navigation_paths')
+          .select()
+          .eq('id', pathId)
+          .eq('user_id', userId)
+          .single();
+      
+      // Then, load all waypoints for this path
+      final waypointsResponse = await client
+          .from('path_waypoints')
+          .select()
+          .eq('path_id', pathId)
+          .order('sequence_number');
+      
+      // Convert waypoints data to PathWaypoint objects
+      final waypoints = (waypointsResponse as List<dynamic>).map((waypointData) {
+        return PathWaypoint(
+          id: waypointData['id'],
+          sequenceNumber: waypointData['sequence_number'],
+          embedding: List<double>.from(waypointData['embedding'] ?? []),
+          heading: waypointData['heading'].toDouble(),
+          headingChange: waypointData['heading_change'].toDouble(),
+          turnType: TurnType.values.firstWhere(
+            (e) => e.name == waypointData['turn_type'],
+            orElse: () => TurnType.straight,
+          ),
+          isDecisionPoint: waypointData['is_decision_point'],
+          landmarkDescription: waypointData['landmark_description'],
+          distanceFromPrevious: waypointData['distance_from_previous']?.toDouble(),
+          timestamp: DateTime.parse(waypointData['timestamp']),
+        );
+      }).toList();
+      
+      // Create NavigationPath object
+      return NavigationPath(
+        id: pathResponse['id'],
+        name: pathResponse['name'],
+        startLocationId: pathResponse['start_location_id'],
+        endLocationId: pathResponse['end_location_id'],
+        waypoints: waypoints,
+        estimatedDistance: pathResponse['estimated_distance'].toDouble(),
+        estimatedSteps: pathResponse['estimated_steps'],
+        createdAt: DateTime.parse(pathResponse['created_at']),
+        updatedAt: DateTime.parse(pathResponse['updated_at']),
+      );
+    } catch (e) {
+      print('Error loading navigation path: $e');
+      return null;
+    }
+  }
+
+  // Load all navigation paths for the current user
+  Future<List<NavigationPath>> loadAllPaths() async {
+    try {
+      final userId = currentUser?.id;
+      print('=== loadAllPaths() called ===');
+      print('Current user ID: $userId');
+      
+      if (userId == null) {
+        print('❌ User not authenticated');
+        throw Exception('User not authenticated');
+      }
+      
+      // Load all navigation paths for the user
+      print('Querying navigation_paths table...');
+      final pathsResponse = await client
+          .from('navigation_paths')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false);
+      
+      print('Raw paths response: $pathsResponse');
+      print('Number of paths found: ${(pathsResponse as List).length}');
+      
+      final List<NavigationPath> paths = [];
+      
+      for (final pathData in pathsResponse as List<dynamic>) {
+        final pathId = pathData['id'];
+        print('Processing path: ${pathData['name']} (ID: $pathId)');
+        print('  Start location: ${pathData['start_location_id']}');
+        print('  End location: ${pathData['end_location_id']}');
+        
+        // Load waypoints for this path
+        final waypointsResponse = await client
+            .from('path_waypoints')
+            .select()
+            .eq('path_id', pathId)
+            .order('sequence_number');
+        
+        print('  Found ${(waypointsResponse as List).length} waypoints');
+        
+        // Debug: Print raw waypoint data to see exact structure
+        if ((waypointsResponse as List).isNotEmpty) {
+          final firstWaypoint = (waypointsResponse as List)[0];
+          print('  DEBUG - First waypoint raw data:');
+          print('    ID: ${firstWaypoint['id']} (type: ${firstWaypoint['id'].runtimeType})');
+          print('    Embedding: ${firstWaypoint['embedding']} (type: ${firstWaypoint['embedding'].runtimeType})');
+          print('    Heading: ${firstWaypoint['heading']} (type: ${firstWaypoint['heading'].runtimeType})');
+        }
+        
+        // Convert waypoints data to PathWaypoint objects
+        final waypoints = (waypointsResponse as List<dynamic>).map((waypointData) {
+          // Handle embedding data - could be String, List, or null
+          List<double> embedding = [];
+          final embeddingData = waypointData['embedding'];
+          if (embeddingData != null) {
+            if (embeddingData is String) {
+              // If it's a string representation, try to parse it
+              try {
+                // Remove brackets and split by comma
+                final cleanString = embeddingData.replaceAll('[', '').replaceAll(']', '');
+                if (cleanString.isNotEmpty) {
+                  embedding = cleanString.split(',').map((e) => double.parse(e.trim())).toList();
+                }
+              } catch (e) {
+                print('Warning: Could not parse embedding string: $e');
+              }
+            } else if (embeddingData is List) {
+              // If it's already a list, convert to double list
+              embedding = List<double>.from(embeddingData);
+            }
+          }
+          
+          return PathWaypoint(
+            id: waypointData['id'],
+            sequenceNumber: waypointData['sequence_number'],
+            embedding: embedding,
+            heading: waypointData['heading'].toDouble(),
+            headingChange: waypointData['heading_change'].toDouble(),
+            turnType: TurnType.values.firstWhere(
+              (e) => e.name == waypointData['turn_type'],
+              orElse: () => TurnType.straight,
+            ),
+            isDecisionPoint: waypointData['is_decision_point'],
+            landmarkDescription: waypointData['landmark_description'],
+            distanceFromPrevious: waypointData['distance_from_previous']?.toDouble(),
+            timestamp: DateTime.parse(waypointData['timestamp']),
+          );
+        }).toList();
+        
+        // Create NavigationPath object
+        final navigationPath = NavigationPath(
+          id: pathData['id'],
+          name: pathData['name'],
+          startLocationId: pathData['start_location_id'],
+          endLocationId: pathData['end_location_id'],
+          waypoints: waypoints,
+          estimatedDistance: pathData['estimated_distance'].toDouble(),
+          estimatedSteps: pathData['estimated_steps'],
+          createdAt: DateTime.parse(pathData['created_at']),
+          updatedAt: DateTime.parse(pathData['updated_at']),
+        );
+        
+        print('  Created NavigationPath: ${navigationPath.name}');
+        paths.add(navigationPath);
+      }
+      
+      print('Total NavigationPath objects created: ${paths.length}');
+      return paths;
+    } catch (e) {
+      print('Error loading navigation paths: $e');
+      return [];
+    }
+  }
+
   Future<String> saveRecordedPath(Map<String, dynamic> pathData) async {
     try {
       final String pathId = uuid.v4();

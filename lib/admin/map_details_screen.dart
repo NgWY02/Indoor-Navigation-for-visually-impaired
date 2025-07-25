@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
 import '../services/supabase_service.dart';
 import 'node_capture.dart'; // Import NodeCapture screen
 import 'map_service.dart'; // Import MapService for image loading
+import '../screens/admin/path_recording_screen.dart';
 import 'dart:ui' as ui;
 import 'dart:math';
 
@@ -26,6 +28,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   String? _selectedEndNodeId;
   List<Map<String, dynamic>> _connections = [];
   bool _isLoadingConnections = false;
+  String? _selectedConnectionId;
 
   @override
   void initState() {
@@ -51,6 +54,8 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           if (success && mounted) {
             setState(() {});
             print('Map image loaded successfully');
+            // Load connections after map image is loaded
+            _loadConnections();
           }
         });
       }
@@ -65,15 +70,92 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   }
 
   Future<void> _loadConnections() async {
+    print('=== _loadConnections() called ===');
     setState(() {
       _isLoadingConnections = true;
     });
     
     try {
-      final navigationData = await _supabaseService.getNavigationData(widget.mapId);
+      // Ensure we have current map data
+      if (_currentMapData == null) {
+        print('Current map data is null, loading fresh map data...');
+        final mapData = await _supabaseService.getMapDetails(widget.mapId);
+        _currentMapData = mapData;
+        print('Fresh map data loaded with ${_currentMapData?['map_nodes']?.length ?? 0} nodes');
+      } else {
+        print('Using existing map data with ${_currentMapData?['map_nodes']?.length ?? 0} nodes');
+      }
+      
+      // Load only recorded navigation paths
+      print('Loading all navigation paths...');
+      final allPaths = await _supabaseService.loadAllPaths();
+      print('Loaded ${allPaths.length} navigation paths from database');
+      
+      for (int i = 0; i < allPaths.length; i++) {
+        final path = allPaths[i];
+        print('Path $i: ${path.name} (${path.startLocationId} -> ${path.endLocationId})');
+      }
+      
       if (mounted) {
         setState(() {
-          _connections = List<Map<String, dynamic>>.from(navigationData['connections'] ?? []);
+          _connections = [];
+          
+          // Add navigation_paths (recorded paths) that have start/end nodes in current map
+          final currentMapNodes = _currentMapData?['map_nodes'] ?? [];
+          print('Current map has ${currentMapNodes.length} nodes');
+          
+          for (final node in currentMapNodes) {
+            print('  Node: ${node['id']} (${node['name']})');
+          }
+          
+          int matchedPaths = 0;
+          for (final path in allPaths) {
+            print('Checking path: ${path.name}');
+            print('  Looking for start node with ID: ${path.startLocationId}');
+            print('  Looking for end node with ID: ${path.endLocationId}');
+            
+            // Check if this path connects nodes from current map by node ID
+            final startNode = currentMapNodes.firstWhere(
+              (node) {
+                bool matches = node['id'].toString() == path.startLocationId.toString();
+                print('    Node ${node['id']} vs start ${path.startLocationId}: $matches');
+                return matches;
+              },
+              orElse: () => null,
+            );
+            final endNode = currentMapNodes.firstWhere(
+              (node) {
+                bool matches = node['id'].toString() == path.endLocationId.toString();
+                print('    Node ${node['id']} vs end ${path.endLocationId}: $matches');
+                return matches;
+              },
+              orElse: () => null,
+            );
+            
+            print('  Start node found: ${startNode != null} ${startNode != null ? '(${startNode['name']})' : ''}');
+            print('  End node found: ${endNode != null} ${endNode != null ? '(${endNode['name']})' : ''}');
+            
+            if (startNode != null && endNode != null) {
+              print('  ✅ Adding connection for path: ${path.name}');
+              matchedPaths++;
+              _connections.add({
+                'id': path.id,
+                'node_a_id': startNode['id'],
+                'node_b_id': endNode['id'],
+                'distance_meters': path.estimatedDistance,
+                'steps': path.estimatedSteps,
+                'custom_instruction': 'Recorded Path: ${path.name}',
+                'connection_type': 'recorded', // Mark as recorded path
+                'created_at': path.createdAt.toIso8601String(),
+              });
+            } else {
+              print('  ❌ Path not matched - nodes not found in current map');
+            }
+          }
+          
+          print('Total matched paths for this map: $matchedPaths');
+          print('Total connections to display: ${_connections.length}');
+          
           _isLoadingConnections = false;
         });
       }
@@ -184,6 +266,136 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     });
   }
 
+  void _onMapTapped(TapUpDetails details, double mapWidth, double mapHeight, double scaleX, double scaleY) {
+    final tapPosition = details.localPosition;
+    
+    // Check if tap is near any connection line
+    for (final connection in _connections) {
+      final nodeA = _currentMapData!['map_nodes'].firstWhere(
+        (node) => node['id'] == connection['node_a_id'],
+        orElse: () => null,
+      );
+      final nodeB = _currentMapData!['map_nodes'].firstWhere(
+        (node) => node['id'] == connection['node_b_id'],
+        orElse: () => null,
+      );
+
+      if (nodeA != null && nodeB != null) {
+        final double x1 = (nodeA['x_position'] as num).toDouble() * scaleX;
+        final double y1 = (nodeA['y_position'] as num).toDouble() * scaleY;
+        final double x2 = (nodeB['x_position'] as num).toDouble() * scaleX;
+        final double y2 = (nodeB['y_position'] as num).toDouble() * scaleY;
+
+        // Calculate distance from tap to line
+        final distance = _distanceToLineSegment(
+          tapPosition, 
+          Offset(x1, y1), 
+          Offset(x2, y2),
+        );
+
+        if (distance < 20) { // 20 pixel tolerance
+          _showConnectionOptions(connection);
+          return;
+        }
+      }
+    }
+    
+    // Clear selection if tapped on empty area
+    setState(() {
+      _selectedConnectionId = null;
+    });
+  }
+
+  double _distanceToLineSegment(Offset point, Offset lineStart, Offset lineEnd) {
+    final double A = point.dx - lineStart.dx;
+    final double B = point.dy - lineStart.dy;
+    final double C = lineEnd.dx - lineStart.dx;
+    final double D = lineEnd.dy - lineStart.dy;
+
+    final double dot = A * C + B * D;
+    final double lenSq = C * C + D * D;
+    double param = -1;
+    if (lenSq != 0) {
+      param = dot / lenSq;
+    }
+
+    double xx, yy;
+
+    if (param < 0) {
+      xx = lineStart.dx;
+      yy = lineStart.dy;
+    } else if (param > 1) {
+      xx = lineEnd.dx;
+      yy = lineEnd.dy;
+    } else {
+      xx = lineStart.dx + param * C;
+      yy = lineStart.dy + param * D;
+    }
+
+    final double dx = point.dx - xx;
+    final double dy = point.dy - yy;
+    return sqrt(dx * dx + dy * dy);
+  }
+
+  void _showConnectionOptions(Map<String, dynamic> connection) {
+    final nodeA = _currentMapData!['map_nodes'].firstWhere(
+      (node) => node['id'] == connection['node_a_id'],
+      orElse: () => {'name': 'Unknown'},
+    );
+    final nodeB = _currentMapData!['map_nodes'].firstWhere(
+      (node) => node['id'] == connection['node_b_id'],
+      orElse: () => {'name': 'Unknown'},
+    );
+
+    setState(() {
+      _selectedConnectionId = connection['id'];
+    });
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Connection Options'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('From: ${nodeA['name']}'),
+            Text('To: ${nodeB['name']}'),
+            if (connection['distance_meters'] != null)
+              Text('Distance: ${connection['distance_meters'].toStringAsFixed(1)}m'),
+            if (connection['steps'] != null)
+              Text('Steps: ${connection['steps']}'),
+            if (connection['custom_instruction'] != null)
+              Text('Note: ${connection['custom_instruction']}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() {
+                _selectedConnectionId = null;
+              });
+            },
+            child: const Text('Close'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () {
+              Navigator.of(context).pop();
+              _deleteConnection(connection['id']);
+            },
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    ).then((_) {
+      setState(() {
+        _selectedConnectionId = null;
+      });
+    });
+  }
+
   void _showConnectionDialog() {
     final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
     final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
@@ -193,9 +405,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
       builder: (context) => ConnectionDialog(
         startNodeName: startNode['name'],
         endNodeName: endNode['name'],
-        onCreateBasic: () async {
-          await _createConnection(null, null, null);
-        },
         onRecordPath: () async {
           Navigator.of(context).pop(); // Close dialog first
           await _startPathRecording();
@@ -204,51 +413,20 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     );
   }
 
-  Future<void> _createConnection(double? distance, int? steps, String? instruction) async {
-    try {
-      await _supabaseService.createNodeConnection(
-        mapId: widget.mapId,
-        nodeAId: _selectedStartNodeId!,
-        nodeBId: _selectedEndNodeId!,
-        distanceMeters: distance,
-        steps: steps,
-        customInstruction: instruction,
-      );
-      
-      if (mounted) {
-        setState(() {
-          _selectedStartNodeId = null;
-          _selectedEndNodeId = null;
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Connection created successfully!'),
-            backgroundColor: Colors.green,
-          ),
-        );
-        
-        _loadConnections();
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error creating connection: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _deleteConnection(String connectionId) async {
+    // Check if the connection exists
+    try {
+      _connections.firstWhere((conn) => conn['id'] == connectionId);
+    } catch (e) {
+      return; // Connection not found
+    }
+    
     final confirm = await showDialog<bool>(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
           title: const Text('Confirm Deletion'),
-          content: const Text('Are you sure you want to delete this connection? This action cannot be undone.'),
+          content: const Text('Are you sure you want to delete this recorded path? This action cannot be undone.'),
           actions: <Widget>[
             TextButton(
               child: const Text('Cancel'),
@@ -266,17 +444,30 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
     if (confirm == true) {
       try {
-        await _supabaseService.deleteNodeConnection(connectionId);
+        // Delete the recorded path from navigation_paths table
+        await _supabaseService.deleteNavigationPath(connectionId);
+        
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Connection deleted successfully.')),
+            const SnackBar(
+              content: Text('Recorded path deleted successfully!'),
+              backgroundColor: Colors.green,
+            ),
           );
+          
+          setState(() {
+            _selectedConnectionId = null;
+          });
+          
           _loadConnections();
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting connection: $e')),
+            SnackBar(
+              content: Text('Error deleting recorded path: $e'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
       }
@@ -286,31 +477,63 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   Future<void> _startPathRecording() async {
     if (_selectedStartNodeId == null || _selectedEndNodeId == null) return;
     
-    // Get node details for the recording
-    final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
-    final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
-    
-    // Show a placeholder message for path recording
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Path recording from ${startNode['name']} to ${endNode['name']} will be implemented later'),
-        duration: Duration(seconds: 3),
-      ),
-    );
-    
-    // Reset selection for now
-    if (mounted) {
-      setState(() {
-        _selectedStartNodeId = null;
-        _selectedEndNodeId = null;
-      });
-      _loadConnections();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Path recorded successfully!'),
-          backgroundColor: Colors.green,
+    try {
+      // Get available cameras
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No camera available for path recording'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Get node details for the recording
+      final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
+      final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
+      
+      // Navigate to path recording screen
+      final result = await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => PathRecordingScreen(
+            camera: cameras.first,
+            startLocationId: _selectedStartNodeId!,
+            endLocationId: _selectedEndNodeId!,
+            startLocationName: startNode['name'],
+            endLocationName: endNode['name'],
+          ),
         ),
       );
+
+      // Reset selection and reload connections
+      if (mounted) {
+        setState(() {
+          _selectedStartNodeId = null;
+          _selectedEndNodeId = null;
+        });
+        
+        _loadConnections();
+        
+        if (result != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Path recorded successfully!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error starting path recording: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -330,11 +553,23 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
             return const Text('Map Details');
           },
         ),
+        backgroundColor: _isConnectionMode ? Colors.orange[100] : null,
         actions: [
           IconButton(
-            icon: Icon(_isConnectionMode ? Icons.link_off : Icons.link),
+            icon: Icon(
+              _isConnectionMode ? Icons.link_off : Icons.link,
+              color: _isConnectionMode ? Colors.orange[800] : null,
+            ),
             tooltip: _isConnectionMode ? 'Exit Connection Mode' : 'Connection Mode',
             onPressed: _toggleConnectionMode,
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh Connections (Debug)',
+            onPressed: () {
+              print('🔄 Manual refresh triggered by user');
+              _loadConnections();
+            },
           ),
           IconButton(
             icon: const Icon(Icons.add_location_alt),
@@ -450,14 +685,18 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                                   SizedBox(
                                     width: targetWidth,
                                     height: targetHeight,
+                                    child: GestureDetector(
+                                      onTapUp: (details) => _onMapTapped(details, targetWidth, targetHeight, scaleX, scaleY),
                       child: CustomPaint(
                         painter: MapWithConnectionsPainter(
                           mapImage: _mapService.mapUIImage!,
                           nodes: nodes,
                           connections: _connections,
+                          selectedConnectionId: _selectedConnectionId,
                         ),
                         child: Container(),
                                     ),
+                                  ),
                                   ),
                                   
                     // Interactive node markers
@@ -615,8 +854,16 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
         return Card(
           margin: const EdgeInsets.symmetric(vertical: 4.0, horizontal: 8.0),
+          color: connection['id'] == _selectedConnectionId 
+              ? Colors.red.withOpacity(0.1) 
+              : null,
           child: ListTile(
-            leading: const Icon(Icons.link, color: Colors.blue),
+            leading: Icon(
+              Icons.route, 
+              color: connection['id'] == _selectedConnectionId 
+                  ? Colors.red 
+                  : Colors.green,
+            ),
             title: Text('${nodeA['name']} → ${nodeB['name']}'),
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -627,6 +874,17 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   Text('Steps: ${connection['steps']}'),
                 if (connection['custom_instruction'] != null)
                   Text('Note: ${connection['custom_instruction']}'),
+                const SizedBox(height: 4),
+                Text(
+                  connection['connection_type'] == 'recorded' 
+                      ? 'Green line: Recorded walking path with AI data'
+                      : 'Blue line: Basic structural connection',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
               ],
             ),
             trailing: IconButton(
@@ -698,11 +956,13 @@ class MapWithConnectionsPainter extends CustomPainter {
   final ui.Image mapImage;
   final List<dynamic> nodes;
   final List<Map<String, dynamic>> connections;
+  final String? selectedConnectionId;
 
   MapWithConnectionsPainter({
     required this.mapImage,
     required this.nodes,
     required this.connections,
+    this.selectedConnectionId,
   });
 
   @override
@@ -716,15 +976,10 @@ class MapWithConnectionsPainter extends CustomPainter {
     );
 
     // Scale factors
-      final double scaleX = size.width / mapImage.width;
-      final double scaleY = size.height / mapImage.height;
+    final double scaleX = size.width / mapImage.width;
+    final double scaleY = size.height / mapImage.height;
 
     // Draw connections
-    final connectionPaint = Paint()
-      ..color = Colors.blue.withOpacity(0.7)
-      ..strokeWidth = 3.0
-      ..style = PaintingStyle.stroke;
-
     for (final connection in connections) {
       final nodeA = nodes.firstWhere(
         (node) => node['id'] == connection['node_a_id'],
@@ -741,18 +996,50 @@ class MapWithConnectionsPainter extends CustomPainter {
         final double x2 = (nodeB['x_position'] as num).toDouble() * scaleX;
         final double y2 = (nodeB['y_position'] as num).toDouble() * scaleY;
 
+        // Different styling based on selection state
+        final bool isSelected = connection['id'] == selectedConnectionId;
+        
+        late final Paint connectionPaint;
+        
+        if (isSelected) {
+          connectionPaint = Paint()
+            ..color = Colors.red.withOpacity(0.8)
+            ..strokeWidth = 4.0
+            ..style = PaintingStyle.stroke;
+        } else {
+          // All connections are recorded paths - use green
+          connectionPaint = Paint()
+            ..color = Colors.green.withOpacity(0.7)
+            ..strokeWidth = 3.5
+            ..style = PaintingStyle.stroke;
+        }
+
+        // Draw connection line
         canvas.drawLine(
           Offset(x1, y1),
           Offset(x2, y2),
           connectionPaint,
         );
 
-        // Draw arrow in the middle
+        // Draw arrow in the middle pointing from A to B
         final double midX = (x1 + x2) / 2;
         final double midY = (y1 + y2) / 2;
         final double angle = atan2(y2 - y1, x2 - x1);
         
         _drawArrow(canvas, Offset(midX, midY), angle, connectionPaint);
+        
+        // Draw connection type label
+        String typeLabel = 'PATH';
+        if (connection['distance_meters'] != null) {
+          typeLabel = '$typeLabel (${connection['distance_meters'].toStringAsFixed(1)}m)';
+        }
+        
+        _drawDistanceLabel(
+          canvas, 
+          Offset(midX, midY - 20), 
+          typeLabel,
+          isSelected,
+        );
       }
     }
   }
@@ -778,22 +1065,67 @@ class MapWithConnectionsPainter extends CustomPainter {
     canvas.drawPath(arrowPath, paint..style = PaintingStyle.fill);
   }
 
+  void _drawDistanceLabel(Canvas canvas, Offset position, String text, bool isSelected) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          color: isSelected ? Colors.red : Colors.blue,
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          shadows: [
+            Shadow(
+              offset: Offset(1, 1),
+              blurRadius: 2,
+              color: Colors.white,
+            ),
+          ],
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    
+    textPainter.layout();
+    
+    // Draw background
+    final backgroundPaint = Paint()
+      ..color = Colors.white.withOpacity(0.8)
+      ..style = PaintingStyle.fill;
+    
+    final backgroundRect = Rect.fromCenter(
+      center: position,
+      width: textPainter.width + 8,
+      height: textPainter.height + 4,
+    );
+    
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(backgroundRect, Radius.circular(4)),
+      backgroundPaint,
+    );
+    
+    textPainter.paint(
+      canvas,
+      Offset(
+        position.dx - textPainter.width / 2,
+        position.dy - textPainter.height / 2,
+      ),
+    );
+  }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }
 
-// Connection dialog widget
+// Connection dialog widget - simplified to only record paths
 class ConnectionDialog extends StatelessWidget {
   final String startNodeName;
   final String endNodeName;
-  final VoidCallback onCreateBasic;
   final VoidCallback onRecordPath;
 
   const ConnectionDialog({
     Key? key,
     required this.startNodeName,
     required this.endNodeName,
-    required this.onCreateBasic,
     required this.onRecordPath,
   }) : super(key: key);
 
@@ -803,7 +1135,7 @@ class ConnectionDialog extends StatelessWidget {
     final isTablet = screenSize.width > 600;
     
     return AlertDialog(
-      title: const Text('Create Connection'),
+      title: const Text('Record Navigation Path'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -812,7 +1144,7 @@ class ConnectionDialog extends StatelessWidget {
           Text('To: $endNodeName'),
           const SizedBox(height: 20),
           const Text(
-            'How would you like to create this connection?',
+            'Ready to record your navigation path?',
             style: TextStyle(fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 16),
@@ -821,7 +1153,7 @@ class ConnectionDialog extends StatelessWidget {
             child: ElevatedButton.icon(
               onPressed: onRecordPath,
               icon: const Icon(Icons.directions_walk),
-              label: const Text('Record Path'),
+              label: const Text('Start Recording Path'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
@@ -834,30 +1166,7 @@ class ConnectionDialog extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Walk the path and automatically record distance, steps, and objects',
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: onCreateBasic,
-              icon: const Icon(Icons.link),
-              label: const Text('Basic Connection'),
-              style: OutlinedButton.styleFrom(
-                padding: EdgeInsets.symmetric(
-                  vertical: isTablet ? 16 : 12,
-                  horizontal: 16,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Create a simple connection without recorded data',
+            'Walk the path to automatically record distance, steps, and visual landmarks. A connection line will appear after recording.',
             style: TextStyle(
               fontSize: 12,
               color: Colors.grey,
