@@ -9,9 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:image/image.dart' as img;
-import 'package:tflite_flutter/tflite_flutter.dart';
 import 'services/supabase_service.dart';
+import 'services/clip_service.dart';
 import 'package:flutter/foundation.dart'; 
 
 // Utility function for reshaping lists (from navigation_screen)
@@ -165,7 +164,8 @@ class NavigationLocalizationScreen extends StatefulWidget {
 class _NavigationLocalizationScreenState
     extends State<NavigationLocalizationScreen> {
   late CameraController _cameraController;
-  late Interpreter _interpreter;
+  late ClipService _clipService;
+  bool _isClipServerReady = false;
   Map<String, List<double>> _storedEmbeddings = {};
   String _recognizedPlace = "Ready to scan"; // Initial state
   double _confidence = 0.0;
@@ -261,17 +261,22 @@ class _NavigationLocalizationScreenState
   }
 
   Future<void> _loadModel() async {
-    _debugLog('Loading model');
+    _debugLog('Initializing CLIP service');
     try {
-      _interpreter =
-          await Interpreter.fromAsset('assets/models/feature_extractor.tflite');
-      _debugLog('Model loaded successfully');
+      _clipService = ClipService();
+      _isClipServerReady = await _clipService.isServerAvailable();
+      if (_isClipServerReady) {
+        _debugLog('CLIP service initialized successfully');
+      } else {
+        _debugLog('CLIP server not ready - will use fallback');
+      }
     } catch (e) {
-      _debugLog('Error loading model: $e');
+      _debugLog('Error initializing CLIP service: $e');
+      _isClipServerReady = false;
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _recognizedPlace = "Model error: $e";
+          _recognizedPlace = "CLIP service error: $e";
         });
       }
     }
@@ -665,63 +670,30 @@ class _NavigationLocalizationScreenState
       _debugLog('360Scan: Camera not initialized, skipping capture');
       return false;
     }
+    
+    if (!_isClipServerReady) {
+      _debugLog('360Scan: CLIP server not ready, skipping capture');
+      return false;
+    }
+    
     try {
       final image = await _cameraController.takePicture();
       final File imageFile = File(image.path);
-      final imageBytes = await imageFile.readAsBytes();
-      final decodedImage = img.decodeImage(imageBytes);
 
-      if (decodedImage == null) {
-        _debugLog('360Scan: Failed to decode image');
-        await imageFile.delete();
-        return false;
-      }
-
-      final resizedImage =
-          img.copyResize(decodedImage, width: 224, height: 224);
-      final inputBuffer = _prepareImageInput(resizedImage);
-
-      var outputBuffer =
-          List<double>.filled(1 * 1280, 0.0); // Matches model output
-      var output = reshapeList(outputBuffer, [1, 1280]);
-      _interpreter.run(inputBuffer, output);
-      final List<double> embedding = List<double>.from(output[0]);
+      // Use CLIP service to generate embedding
+      final List<double> embedding = await _clipService.generateImageEmbedding(imageFile);
 
       _scan360Results.add({
         'embedding': embedding,
         'heading': _currentHeading ?? 0.0, // Store heading at time of capture
       });
-      _debugLog('360Scan: Stored embedding. Total: ${_scan360Results.length}');
+      _debugLog('360Scan: Stored CLIP embedding with ${embedding.length} dimensions. Total: ${_scan360Results.length}');
       await imageFile.delete(); // Delete temp image
       return true;
     } catch (e) {
       _debugLog('360Scan: Error capturing or processing image: $e');
       return false;
     }
-  }
-
-  List<List<List<List<double>>>> _prepareImageInput(img.Image image) {
-    // Consistent with navigation_screen and typical model inputs
-    const int width = 224;
-    const int height = 224;
-    const int channels = 3;
-
-    final input = List.generate(
-        1,
-        (_) => List.generate(
-            height,
-            (_) => List.generate(
-                width, (_) => List.generate(channels, (_) => 0.0))));
-
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        final pixel = image.getPixel(x, y);
-        input[0][y][x][0] = (pixel.r.toDouble() / 127.5) - 1.0;
-        input[0][y][x][1] = (pixel.g.toDouble() / 127.5) - 1.0;
-        input[0][y][x][2] = (pixel.b.toDouble() / 127.5) - 1.0;
-      }
-    }
-    return input;
   }
 
   void _process360ScanResults() {
@@ -897,7 +869,8 @@ class _NavigationLocalizationScreenState
   @override
   void dispose() {
     _cameraController.dispose();
-    _interpreter.close();
+    // CLIP service uses HTTP client which is automatically disposed
+    _debugLog('Disposing CLIP service resources');
     _compassSubscription360?.cancel();
     _scan360Timer?.cancel();
     _flutterTts.stop();
