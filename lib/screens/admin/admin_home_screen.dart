@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../services/responsive_helper.dart';
 import '../user/navigation_main_screen.dart';
 import '../../admin/map_management.dart';
 import '../common/profile_screen.dart';
@@ -12,9 +11,24 @@ class AdminHomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final isTablet = screenWidth > 600;
+    final isLargeTablet = screenWidth > 900;
+    
+    // Calculate responsive values
+    final horizontalPadding = isLargeTablet ? 48.0 : (isTablet ? 32.0 : 20.0);
+    final verticalPadding = isTablet ? 24.0 : 16.0;
+    final bottomSafeArea = mediaQuery.padding.bottom;
+    
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Admin Dashboard'),
+        title: Text(
+          'Admin Dashboard',
+          style: TextStyle(
+            fontSize: isTablet ? 22 : 20,
+          ),
+        ),
         centerTitle: true,
         backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
@@ -33,7 +47,12 @@ class AdminHomeScreen extends StatelessWidget {
         ),
         child: SafeArea(
           child: Padding(
-            padding: ResponsiveHelper.getResponsivePadding(context),
+            padding: EdgeInsets.only(
+              left: horizontalPadding,
+              right: horizontalPadding,
+              top: verticalPadding,
+              bottom: bottomSafeArea > 0 ? verticalPadding + 8 : verticalPadding,
+            ),
             child: Column(
               children: [
                 Expanded(
@@ -46,14 +65,14 @@ class AdminHomeScreen extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.admin_panel_settings,
-                          size: ResponsiveHelper.getLargeIconSize(context),
+                          size: isLargeTablet ? 120 : (isTablet ? 100 : 80),
                           color: Colors.white,
                         ),
                         const SizedBox(height: 16),
                         Text(
                           'Welcome, Admin',
                           style: TextStyle(
-                            fontSize: ResponsiveHelper.getHeaderFontSize(context),
+                            fontSize: isLargeTablet ? 32 : (isTablet ? 28 : 24),
                             fontWeight: FontWeight.bold,
                             color: Colors.white,
                           ),
@@ -62,7 +81,7 @@ class AdminHomeScreen extends StatelessWidget {
                         Text(
                           'Choose an option below',
                           style: TextStyle(
-                            fontSize: ResponsiveHelper.getBodyFontSize(context),
+                            fontSize: isLargeTablet ? 18 : (isTablet ? 16 : 14),
                             color: Colors.white.withOpacity(0.9),
                           ),
                         ),
@@ -73,56 +92,123 @@ class AdminHomeScreen extends StatelessWidget {
                 ),
                 Expanded(
                   flex: 2,
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildMenuCard(
-                        context,
-                        icon: Icons.navigation,
-                        title: 'Navigation',
-                        subtitle: 'Test navigation system',
-                        color: Colors.green,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => NavigationMainScreen(
-                                camera: cameras.first,
-                              ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // For very wide screens, use a grid layout
+                      if (constraints.maxWidth > 800) {
+                        return GridView.count(
+                          crossAxisCount: isLargeTablet ? 3 : 2,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                          childAspectRatio: 1.5,
+                          children: [
+                            _buildMenuCard(
+                              context,
+                              icon: Icons.navigation,
+                              title: 'Navigation',
+                              subtitle: 'Test navigation system',
+                              color: Colors.green,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => NavigationMainScreen(
+                                      camera: cameras.first,
+                                    ),
+                                  ),
+                                );
+                              },
+                              isLargeScreen: isLargeTablet,
                             ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      _buildMenuCard(
-                        context,
-                        icon: Icons.map,
-                        title: 'Map Management',
-                        subtitle: 'Manage maps and nodes',
-                        color: Colors.orange,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => const MapManagement(),
+                            _buildMenuCard(
+                              context,
+                              icon: Icons.map,
+                              title: 'Map Management',
+                              subtitle: 'Manage maps and nodes',
+                              color: Colors.orange,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => const MapManagement(),
+                                  ),
+                                );
+                              },
+                              isLargeScreen: isLargeTablet,
                             ),
-                          );
-                        },
-                      ),
-                      const SizedBox(height: 20),
-                      _buildMenuCard(
-                        context,
-                        icon: Icons.person,
-                        title: 'Profile',
-                        subtitle: 'Account settings',
-                        color: Colors.purple,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => const ProfileScreen(),
+                            _buildMenuCard(
+                              context,
+                              icon: Icons.person,
+                              title: 'Profile',
+                              subtitle: 'Account settings',
+                              color: Colors.purple,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => const ProfileScreen(),
+                                  ),
+                                );
+                              },
+                              isLargeScreen: isLargeTablet,
                             ),
-                          );
-                        },
-                      ),
-                    ],
+                          ],
+                        );
+                      } else {
+                        // For mobile and small tablets, use column layout
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildMenuCard(
+                              context,
+                              icon: Icons.navigation,
+                              title: 'Navigation',
+                              subtitle: 'Test navigation system',
+                              color: Colors.green,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => NavigationMainScreen(
+                                      camera: cameras.first,
+                                    ),
+                                  ),
+                                );
+                              },
+                              isLargeScreen: isTablet,
+                            ),
+                            const SizedBox(height: 20),
+                            _buildMenuCard(
+                              context,
+                              icon: Icons.map,
+                              title: 'Map Management',
+                              subtitle: 'Manage maps and nodes',
+                              color: Colors.orange,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => const MapManagement(),
+                                  ),
+                                );
+                              },
+                              isLargeScreen: isTablet,
+                            ),
+                            const SizedBox(height: 20),
+                            _buildMenuCard(
+                              context,
+                              icon: Icons.person,
+                              title: 'Profile',
+                              subtitle: 'Account settings',
+                              color: Colors.purple,
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (context) => const ProfileScreen(),
+                                  ),
+                                );
+                              },
+                              isLargeScreen: isTablet,
+                            ),
+                          ],
+                        );
+                      }
+                    },
                   ),
                 ),
                 const SizedBox(height: 40),
@@ -141,15 +227,22 @@ class AdminHomeScreen extends StatelessWidget {
     required String subtitle,
     required Color color,
     required VoidCallback onTap,
+    bool isLargeScreen = false,
   }) {
+    final cardPadding = isLargeScreen ? 24.0 : 16.0;
+    final borderRadius = isLargeScreen ? 16.0 : 12.0;
+    final iconSize = isLargeScreen ? 32.0 : 24.0;
+    final titleFontSize = isLargeScreen ? 20.0 : 18.0;
+    final subtitleFontSize = isLargeScreen ? 16.0 : 14.0;
+    
     return GestureDetector(
       onTap: onTap,
       child: Container(
         width: double.infinity,
-        padding: ResponsiveHelper.getResponsivePadding(context),
+        padding: EdgeInsets.all(cardPadding),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(ResponsiveHelper.getBorderRadius(context)),
+          borderRadius: BorderRadius.circular(borderRadius),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.1),
@@ -161,18 +254,18 @@ class AdminHomeScreen extends StatelessWidget {
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.all(isLargeScreen ? 20 : 16),
               decoration: BoxDecoration(
                 color: color.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(borderRadius * 0.75),
               ),
               child: Icon(
                 icon,
-                size: ResponsiveHelper.getIconSize(context),
+                size: iconSize,
                 color: color,
               ),
             ),
-            const SizedBox(width: 20),
+            SizedBox(width: isLargeScreen ? 24 : 20),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -180,7 +273,7 @@ class AdminHomeScreen extends StatelessWidget {
                   Text(
                     title,
                     style: TextStyle(
-                      fontSize: ResponsiveHelper.getTitleFontSize(context),
+                      fontSize: titleFontSize,
                       fontWeight: FontWeight.bold,
                       color: Colors.grey.shade800,
                     ),
@@ -189,7 +282,7 @@ class AdminHomeScreen extends StatelessWidget {
                   Text(
                     subtitle,
                     style: TextStyle(
-                      fontSize: ResponsiveHelper.getBodyFontSize(context),
+                      fontSize: subtitleFontSize,
                       color: Colors.grey.shade600,
                     ),
                   ),
@@ -198,7 +291,7 @@ class AdminHomeScreen extends StatelessWidget {
             ),
             Icon(
               Icons.arrow_forward_ios,
-              size: ResponsiveHelper.getIconSize(context) * 0.7,
+              size: iconSize * 0.7,
               color: Colors.grey.shade400,
             ),
           ],
