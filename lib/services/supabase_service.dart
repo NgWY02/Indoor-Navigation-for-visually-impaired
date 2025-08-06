@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as path;
 import 'dart:math';
 import '../models/path_models.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // Define user roles
 enum UserRole {
@@ -24,8 +25,8 @@ class SupabaseService {
 
   Future<void> initialize() async {
     await Supabase.initialize(
-      url: 'https://cemfdjiuqjmmxedpnbds.supabase.co',  
-      anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNlbWZkaml1cWptbXhlZHBuYmRzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDQ2MDY1NTQsImV4cCI6MjA2MDE4MjU1NH0.vqw1BYIBmw9-S5Eyy5aXpCKvc0jlBLrTnMYdZF8n00A', 
+      url: dotenv.env['SUPABASE_URL']!,
+      anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
     );
     
     // Initialize required storage buckets

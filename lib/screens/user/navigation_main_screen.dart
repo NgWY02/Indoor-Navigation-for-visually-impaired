@@ -7,7 +7,7 @@ import '../../services/clip_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/position_localization_service.dart';
 import '../../services/real_time_navigation_service.dart' as nav_service;
-import '../../models/path_models.dart';
+import '../../widgets/debug_overlay.dart'; // 🐛 Debug overlay
 
 class NavigationMainScreen extends StatefulWidget {
   final CameraDescription camera;
@@ -18,7 +18,8 @@ class NavigationMainScreen extends StatefulWidget {
   State<NavigationMainScreen> createState() => _NavigationMainScreenState();
 }
 
-class _NavigationMainScreenState extends State<NavigationMainScreen> with WidgetsBindingObserver {
+class _NavigationMainScreenState extends State<NavigationMainScreen> 
+    with WidgetsBindingObserver, DebugOverlayMixin { // 🐛 Add debug overlay mixin
   // Services
   late ClipService _clipService;
   late SupabaseService _supabaseService;
@@ -58,6 +59,12 @@ class _NavigationMainScreenState extends State<NavigationMainScreen> with Widget
     super.dispose();
   }
 
+  // 🧪 Override debug mixin method to test step counter
+  @override
+  void testStepCounter() {
+    _navigationService.testStepCounter();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (!_isCameraInitialized || _cameraController == null) return;
@@ -84,6 +91,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen> with Widget
         onStatusUpdate: _onStatusUpdate,
         onInstructionUpdate: _onInstructionUpdate,
         onError: _onError,
+        onDebugUpdate: updateDebugInfo, // 🐛 Debug callback
       );
 
       // Initialize camera
@@ -101,10 +109,20 @@ class _NavigationMainScreenState extends State<NavigationMainScreen> with Widget
 
   Future<void> _initializeCamera() async {
     try {
-      // Request camera permission
-      final status = await Permission.camera.request();
-      if (status != PermissionStatus.granted) {
+      // Request permissions including step counter
+      final permissions = await [
+        Permission.camera,
+        Permission.activityRecognition, // For step counter
+        Permission.sensors, // For step counter and compass
+      ].request();
+      
+      if (permissions[Permission.camera] != PermissionStatus.granted) {
         throw Exception('Camera permission denied');
+      }
+      
+      // Check step counter permissions
+      if (permissions[Permission.activityRecognition] != PermissionStatus.granted) {
+        print('⚠️ Activity recognition permission denied - step counter may not work');
       }
 
       _cameraController = CameraController(
@@ -268,19 +286,25 @@ class _NavigationMainScreenState extends State<NavigationMainScreen> with Widget
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Column(
+        child: Stack( // 🐛 Wrap in Stack for debug overlay
           children: [
-            // Camera preview
-            Expanded(
-              flex: 3,
-              child: _buildCameraPreview(),
+            Column(
+              children: [
+                // Camera preview
+                Expanded(
+                  flex: 3,
+                  child: _buildCameraPreview(),
+                ),
+                
+                // Control panel
+                Expanded(
+                  flex: 2,
+                  child: _buildControlPanel(),
+                ),
+              ],
             ),
-            
-            // Control panel
-            Expanded(
-              flex: 2,
-              child: _buildControlPanel(),
-            ),
+            // 🐛 Debug overlay
+            buildDebugOverlay(),
           ],
         ),
       ),

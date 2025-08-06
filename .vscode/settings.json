@@ -1,4 +1,7 @@
 {
     "java.configuration.updateBuildConfiguration": "interactive",
-    "cmake.sourceDirectory": "C:/Users/NG WEI YU/Documents/Indoor-Navigation-for-visually-impaired/windows/flutter"
+    "cmake.sourceDirectory": "C:/Users/NG WEI YU/Documents/Indoor-Navigation-for-visually-impaired/windows/flutter",
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python-envs.pythonProjects": []
 }
