@@ -239,7 +239,6 @@ class _MapManagementState extends State<MapManagement> {
     
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).primaryColor, 
         title: Text(
           'Map Management',
           style: TextStyle(
