@@ -27,10 +27,12 @@ dependencies:
   sensors_plus: ^6.1.1
   collection: ^1.18.0
   flutter_vision: ^1.1.4
+  flutter_dotenv: ^5.2.1
   
 flutter:
   uses-material-design: true
   assets:
+    - .env
     - assets/models/                            # Include entire models directory
     - assets/models/feature_extractor.tflite    # MobileNetV2 for place recognition
     - assets/models/labels.txt                  # YOLO class labels
