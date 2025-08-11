@@ -152,19 +152,11 @@ def _detect_default_models() -> Dict[str, Optional[str]]:
 
 
 def initialize_inpaint_models() -> bool:
-    """Initialize SAM predictor, YOLO person detector, and record LaMa config.
+    """Initialize YOLOv8 segmentation and Stable Diffusion inpainting.
 
-    Expects either environment variables or defaults in Inpaint-Anything tree:
-      - SAM_MODEL_TYPE (vit_h | vit_l | vit_b | vit_t)
-      - SAM_CKPT
-      - LAMA_CONFIG_PATH
-      - LAMA_CKPT_DIR (folder containing models and config.yaml)
+    Note: SAM/LaMa are not required and are skipped if unavailable.
     """
     global _sam_mask_generator, _sam_predictor, _yolo_model, _lama_config_path, _lama_ckpt_dir, _sd_inpaint_pipeline
-
-    if SamPredictor is None or sam_model_registry is None:
-        print("⚠️ SAM modules not available. Ensure you ran required installs.")
-        return False
 
     defaults = _detect_default_models()
 
@@ -173,22 +165,15 @@ def initialize_inpaint_models() -> bool:
     _lama_config_path = os.environ.get("LAMA_CONFIG_PATH", defaults.get("lama_config") or "")
     _lama_ckpt_dir = os.environ.get("LAMA_CKPT_DIR", defaults.get("lama_ckpt") or "")
 
+    # Skip SAM/LaMa entirely if unavailable
     if not sam_ckpt or not Path(sam_ckpt).exists():
-        print(f"⚠️ SAM checkpoint not found at '{sam_ckpt}'. Set SAM_CKPT env. Skipping inpaint init.")
-        return False
+        print(f"ℹ️ SAM checkpoint not found at '{sam_ckpt}'. Skipping SAM initialization.")
+        _sam_predictor = None
     if not _lama_config_path or not Path(_lama_config_path).exists() or not _lama_ckpt_dir or not Path(_lama_ckpt_dir).exists():
-        print("⚠️ LaMa paths not ready. Inpainting will be attempted via Inpaint-Anything API if available.")
+        print("ℹ️ LaMa paths not set. Proceeding without LaMa.")
 
     try:
-        sam_model = sam_model_registry[sam_model_type](checkpoint=sam_ckpt)
-        sam_model.to(device=_device_str)
-        # Record and log which SAM is used and on which device
-        globals()["_sam_model_type_used"] = sam_model_type
-        globals()["_sam_ckpt_used"] = sam_ckpt
-        print(f"🔧 SAM device: {_device_str}")
-        
-        # Initialize SAM predictor for prompted segmentation
-        _sam_predictor = SamPredictor(sam_model)
+        # SAM intentionally not initialized
         
         # Initialize YOLO for person detection
         if YOLO is not None:
@@ -268,7 +253,6 @@ def initialize_inpaint_models() -> bool:
         else:
             print("⚠️ Stable Diffusion not available. Install diffusers: pip install diffusers")
         
-        print(f"✅ Initialized SAM ({sam_model_type}) on {_device_str}")
         return True
     except Exception as e:
         print(f"❌ Failed to initialize inpaint models: {e}")
@@ -440,8 +424,6 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
     Returns a PIL image on success, or None to indicate passthrough.
     """
     global _sd_inpaint_pipeline
-    if _sam_predictor is None:
-        return None
     img = _np_image_from_bytes(image_bytes)
     try:
         # Step 1 & 2 Combined: Use YOLOv8 segmentation to detect and segment people in one step
@@ -481,8 +463,18 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
                 pil_image_roi = pil_image_full.crop((x1, y1, x2, y2))
                 pil_mask_roi = pil_mask_full.crop((x1, y1, x2, y2))
 
-                # Resize ROI directly to 512x512 (no letterbox) to avoid border lines
-                target_size = 512
+                # AUTO mode: choose size/steps by ROI size
+                roi_w, roi_h = (x2 - x1), (y2 - y1)
+                if max(roi_w, roi_h) <= 384:
+                    target_size = 384
+                    sd_steps = 6
+                    sd_guidance = 2.8
+                else:
+                    target_size = 512
+                    sd_steps = 8
+                    sd_guidance = 3.0
+
+                # Resize ROI directly (no letterbox) to avoid border lines
                 image_512 = pil_image_roi.resize((target_size, target_size), Image.BICUBIC)
                 # Use NEAREST for mask to keep hard edges; we'll feather later
                 mask_512 = pil_mask_roi.resize((target_size, target_size), Image.NEAREST)
@@ -494,8 +486,8 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
                         prompt="empty hallway, clean indoor space",
                         image=image_512,
                         mask_image=mask_512,
-                        num_inference_steps=8,
-                        guidance_scale=3.0,
+                        num_inference_steps=sd_steps,
+                        guidance_scale=sd_guidance,
                         strength=1.0,
                     )
                 inference_time = time.time() - start_time
@@ -513,7 +505,7 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
 
                 inpainted = np.array(composed)
                 used_pipeline = 'stable_diffusion'
-                print(f"✅ Inpainted using SD1.5 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)})")
+                print(f"✅ Inpainted using SD1.5 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)}, {target_size}px, steps={sd_steps})")
 
             except Exception as e:
                 print(f"⚠️ Stable Diffusion inpainting failed: {e}")
@@ -660,7 +652,7 @@ async def health_check():
             "model": "ViT-L/14",
             "device": _device_str,
             "parameters": "~427M",
-            "features": ["SAM", "Stable Diffusion", "YOLO"]
+            "features": ["Stable Diffusion", "YOLO"]
         }
     
     # Fallback to GRPC client
@@ -913,10 +905,7 @@ async def root():
         "message": "CLIP HTTP Gateway",
         "version": "1.0.0",
         "devices": {
-            "sam_device": _device_str,
             "stable_diffusion_device": _device_str,
-            "sam_model_type": _sam_model_type_used,
-            "sam_ckpt": _sam_ckpt_used,
         },
         "endpoints": {
             "health": "/health",
@@ -930,7 +919,7 @@ if __name__ == "__main__":
     print("🚀 Starting CLIP ViT-L/14 HTTP Gateway...")
     print("🤖 Direct ViT-L/14 model integration (no external server needed)")
     print("🌐 HTTP API will be available at http://192.168.0.104:8000")
-    print("🎯 Features: ViT-L/14 + SAM + Stable Diffusion + YOLO (LaMa removed)")
+    print("🎯 Features: ViT-L/14 + Stable Diffusion + YOLO (SAM removed)")
     print("📊 768-dimensional embeddings for better hallway discrimination")
     print()
     
