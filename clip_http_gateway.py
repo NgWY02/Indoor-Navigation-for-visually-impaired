@@ -64,12 +64,13 @@ try:
 except Exception:
     YOLO = None
 
-# Try Inpaint-Anything's LaMa API first; if not available, fall back to native LaMa load
+# Stable Diffusion inpainting
 try:
-    # from Inpaint-Anything (preferred)
-    from lama_inpaint import inpaint_img_with_lama  # type: ignore
+    from diffusers import StableDiffusionInpaintPipeline, EulerAncestralDiscreteScheduler  # type: ignore
+    import torch  # type: ignore
 except Exception:
-    inpaint_img_with_lama = None
+    StableDiffusionInpaintPipeline = None
+    EulerAncestralDiscreteScheduler = None
 
 # Import the CLIP client
 try:
@@ -78,18 +79,28 @@ except ImportError:
     print("Please install clip-client: pip install clip-client")
     exit(1)
 
-# CLIP client instance
+# Import CLIP ViT-L/14 for better hallway discrimination
+try:
+    import open_clip
+    VITL14_AVAILABLE = True
+except ImportError:
+    print("⚠️ open-clip-torch not available. Install with: pip install open-clip-torch")
+    VITL14_AVAILABLE = False
+
+# CLIP client instance (fallback)
 clip_client = None
+
+# CLIP ViT-L/14 model instances (primary)
+clip_vitl14_model = None
+clip_vitl14_preprocess = None
+clip_vitl14_tokenizer = None
 
 # Inpainting model singletons
 _sam_mask_generator: Optional[Any] = None
 _sam_predictor: Optional[Any] = None
 _yolo_model: Optional[Any] = None
-_lama_config_path: Optional[str] = None
-_lama_ckpt_dir: Optional[str] = None
-_lama_model: Optional[Any] = None
-_lama_device: str = "cuda" if torch.cuda.is_available() else "cpu"
-_device_str: str = _lama_device
+_sd_inpaint_pipeline: Optional[Any] = None
+_device_str: str = "cuda" if torch.cuda.is_available() else "cpu"
 _sam_model_type_used: Optional[str] = None
 _sam_ckpt_used: Optional[str] = None
 
@@ -149,7 +160,7 @@ def initialize_inpaint_models() -> bool:
       - LAMA_CONFIG_PATH
       - LAMA_CKPT_DIR (folder containing models and config.yaml)
     """
-    global _sam_mask_generator, _sam_predictor, _yolo_model, _lama_config_path, _lama_ckpt_dir
+    global _sam_mask_generator, _sam_predictor, _yolo_model, _lama_config_path, _lama_ckpt_dir, _sd_inpaint_pipeline
 
     if SamPredictor is None or sam_model_registry is None:
         print("⚠️ SAM modules not available. Ensure you ran required installs.")
@@ -182,51 +193,80 @@ def initialize_inpaint_models() -> bool:
         # Initialize YOLO for person detection
         if YOLO is not None:
             try:
-                _yolo_model = YOLO('yolov8l.pt')  # Large YOLO model for better accuracy
+                _yolo_model = YOLO('yolov8l-seg.pt')  # Large YOLO segmentation model for detection + segmentation
                 _yolo_model.to(_device_str)
-                print(f"✅ YOLO person detector loaded on {_device_str}")
+                print(f"✅ YOLOv8 segmentation model loaded on {_device_str}")
             except Exception as e:
                 print(f"⚠️ YOLO initialization failed: {e}")
                 _yolo_model = None
         else:
             print("⚠️ YOLO not available. Install ultralytics: pip install ultralytics")
-        # Try to load native LaMa if Inpaint-Anything lama_inpaint is not importable
-        global _lama_model
-        if inpaint_img_with_lama is None and _lama_config_path and _lama_ckpt_dir:
+        
+        # Initialize Stable Diffusion inpainting pipeline
+        if StableDiffusionInpaintPipeline is not None:
             try:
-                from omegaconf import OmegaConf  # type: ignore
-                from saicinpainting.training.trainers import load_checkpoint  # type: ignore
-                import torch as _torch  # type: ignore
-                from torch import serialization as _tser  # type: ignore
-                import pytorch_lightning.callbacks.model_checkpoint as _pl_mc  # type: ignore
+                # Respect override via env, otherwise try safetensors-first models in order
+                preferred = os.environ.get("SD_INPAINT_MODEL")
+                candidate_models = [preferred] if preferred else [
+                    "runwayml/stable-diffusion-inpainting",           # SD 1.5 inpaint (fast) – may use .bin
+                    "stabilityai/stable-diffusion-2-inpainting",      # SD 2 inpaint – safetensors available
+                ]
 
-                # Allowlist PL checkpoint and force weights_only=False for PyTorch >= 2.6
+                last_err = None
+                for model_id in candidate_models:
+                    if not model_id:
+                        continue
+                    print(f"🔄 Loading Stable Diffusion inpainting model: {model_id}")
+                    try:
+                        _sd_inpaint_pipeline = StableDiffusionInpaintPipeline.from_pretrained(
+                            model_id,
+                            torch_dtype=torch.float16 if _device_str == "cuda" else torch.float32,
+                            safety_checker=None,
+                            requires_safety_checker=False,
+                            use_safetensors=True,
+                            variant="fp16",
+                        )
+                        _sd_inpaint_pipeline.to(_device_str)
+                        # Success
+                        break
+                    except Exception as ie:
+                        print(f"⚠️ Failed loading '{model_id}': {ie}")
+                        last_err = ie
+                        _sd_inpaint_pipeline = None
+
+                if _sd_inpaint_pipeline is None:
+                    raise RuntimeError(str(last_err) if last_err else "Could not load any SD inpaint model")
+
+                # Performance optimizations (fast path)
+                if _device_str == "cuda":
+                    _sd_inpaint_pipeline.enable_attention_slicing()
+                    try:
+                        _sd_inpaint_pipeline.enable_vae_tiling()
+                    except Exception:
+                        pass
+                    try:
+                        _sd_inpaint_pipeline.enable_xformers_memory_efficient_attention()
+                    except Exception:
+                        pass
+
                 try:
-                    _tser.add_safe_globals([_pl_mc.ModelCheckpoint])
+                    if EulerAncestralDiscreteScheduler is not None:
+                        _sd_inpaint_pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
+                            _sd_inpaint_pipeline.scheduler.config
+                        )
                 except Exception:
                     pass
 
-                _orig_load = _torch.load
-                def _patched_load(*args, **kwargs):
-                    kwargs.setdefault('weights_only', False)
-                    return _orig_load(*args, **kwargs)
-
-                cfg = OmegaConf.load(_lama_config_path)
                 try:
-                    _torch.load = _patched_load
-                    _lama = load_checkpoint(cfg, _lama_ckpt_dir, strict=False, map_location=_device_str)
-                finally:
-                    _torch.load = _orig_load
-
-                _lama.freeze()
-                _lama.to(_device_str)
-                _globals = globals()
-                _globals['_lama_model'] = _lama
-                print("✅ Initialized SAM and native LaMa model")
+                    torch.set_float32_matmul_precision("high")
+                except Exception:
+                    pass
+                print(f"✅ Stable Diffusion inpainting loaded on {_device_str}")
             except Exception as e:
-                print(f"⚠️ Could not init native LaMa: {e}")
+                print(f"⚠️ Stable Diffusion initialization failed: {e}")
+                _sd_inpaint_pipeline = None
         else:
-            print("✅ Initialized SAM and Inpaint-Anything LaMa API available")
+            print("⚠️ Stable Diffusion not available. Install diffusers: pip install diffusers")
         
         print(f"✅ Initialized SAM ({sam_model_type}) on {_device_str}")
         return True
@@ -259,8 +299,59 @@ def _dilate_mask_binary(mask: np.ndarray, kernel_size: int = 15) -> np.ndarray:
         return (out > 0).astype(np.uint8) * 255
 
 
+def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
+    """Use YOLOv8 segmentation to detect and segment people in one step."""
+    if _yolo_model is None:
+        return []
+    
+    try:
+        import time
+        yolo_start = time.time()
+        
+        results = _yolo_model(img, verbose=False)
+        person_masks = []
+        
+        for result in results:
+            # Check if segmentation masks are available
+            if hasattr(result, 'masks') and result.masks is not None:
+                boxes = result.boxes
+                masks = result.masks
+                
+                for i, box in enumerate(boxes):
+                    # YOLO class 0 is 'person' in COCO dataset
+                    if int(box.cls) == 0 and float(box.conf) > 0.5:  # confidence threshold
+                        # Get the segmentation mask
+                        mask = masks.data[i].cpu().numpy()
+                        # Resize mask to original image size if needed
+                        if mask.shape != img.shape[:2]:
+                            mask_pil = Image.fromarray((mask * 255).astype(np.uint8))
+                            mask_resized = mask_pil.resize((img.shape[1], img.shape[0]))
+                            mask = np.array(mask_resized)
+                        else:
+                            mask = (mask * 255).astype(np.uint8)
+                        
+                        person_masks.append(mask)
+            else:
+                # Fallback to bounding boxes if segmentation not available
+                boxes = result.boxes
+                if boxes is not None:
+                    for box in boxes:
+                        if int(box.cls) == 0 and float(box.conf) > 0.5:
+                            x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0].cpu().numpy()]
+                            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+                            mask[y1:y2, x1:x2] = 255
+                            person_masks.append(mask)
+        
+        yolo_time = time.time() - yolo_start
+        print(f"🎯 YOLOv8-seg detected and segmented {len(person_masks)} people ({yolo_time:.2f}s)")
+        return person_masks
+    except Exception as e:
+        print(f"⚠️ YOLO segmentation failed: {e}")
+        return []
+
+
 def _detect_people_bboxes(img: np.ndarray) -> List[List[float]]:
-    """Use YOLO to detect person bounding boxes in the image."""
+    """Use YOLO to detect person bounding boxes in the image (legacy function for compatibility)."""
     if _yolo_model is None:
         return []
     
@@ -286,16 +377,36 @@ def _detect_people_bboxes(img: np.ndarray) -> List[List[float]]:
 
 
 def _get_sam_masks_from_bboxes(img: np.ndarray, bboxes: List[List[float]]) -> List[np.ndarray]:
-    """Use SAM to generate masks for detected person bounding boxes."""
+    """Use SAM to generate masks for detected person bounding boxes (optimized for speed)."""
     if _sam_predictor is None or not bboxes:
         return []
     
     try:
-        _sam_predictor.set_image(img)
+        import time
+        sam_start = time.time()
+        
+        # SPEED OPTIMIZATION: Resize image for faster SAM processing
+        original_h, original_w = img.shape[:2]
+        max_dim = 512  # Much more aggressive reduction for speed
+        if max(original_h, original_w) > max_dim:
+            scale = max_dim / max(original_h, original_w)
+            new_h, new_w = int(original_h * scale), int(original_w * scale)
+            img_resized = np.array(Image.fromarray(img).resize((new_w, new_h)))
+            scale_factor = scale
+        else:
+            img_resized = img
+            scale_factor = 1.0
+        
+        _sam_predictor.set_image(img_resized)
         masks = []
         
         for bbox in bboxes:
             x1, y1, x2, y2 = bbox
+            
+            # Scale bounding box if image was resized
+            if scale_factor != 1.0:
+                x1, y1, x2, y2 = x1 * scale_factor, y1 * scale_factor, x2 * scale_factor, y2 * scale_factor
+            
             # Use bounding box as prompt for SAM
             input_box = np.array([x1, y1, x2, y2])
             
@@ -303,15 +414,20 @@ def _get_sam_masks_from_bboxes(img: np.ndarray, bboxes: List[List[float]]) -> Li
                 point_coords=None,
                 point_labels=None,
                 box=input_box[None, :],
-                multimask_output=False,
+                multimask_output=False,  # Single mask for speed
             )
             
             if mask is not None and len(mask) > 0:
-                # Convert to uint8 format
-                person_mask = (mask[0] > 0).astype(np.uint8) * 255
+                # Scale mask back to original size if needed
+                if scale_factor != 1.0:
+                    mask_resized = np.array(Image.fromarray((mask[0] > 0).astype(np.uint8) * 255).resize((original_w, original_h)))
+                    person_mask = mask_resized
+                else:
+                    person_mask = (mask[0] > 0).astype(np.uint8) * 255
                 masks.append(person_mask)
         
-        print(f"🎯 SAM generated {len(masks)} person masks from bounding boxes")
+        sam_time = time.time() - sam_start
+        print(f"🎯 SAM generated {len(masks)} person masks from bounding boxes (scale: {scale_factor:.2f}, {sam_time:.2f}s)")
         return masks
     except Exception as e:
         print(f"⚠️ SAM mask generation failed: {e}")
@@ -319,110 +435,130 @@ def _get_sam_masks_from_bboxes(img: np.ndarray, bboxes: List[List[float]]) -> Li
 
 
 def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]:
-    """Use YOLO to detect people, SAM to segment them precisely, then LaMa to inpaint.
+    """Use YOLO to detect people, then either SAM (precise) or YOLO boxes (fast) for masking, then Stable Diffusion to inpaint.
 
     Returns a PIL image on success, or None to indicate passthrough.
     """
+    global _sd_inpaint_pipeline
     if _sam_predictor is None:
         return None
     img = _np_image_from_bytes(image_bytes)
     try:
-        # Step 1: Use YOLO to detect person bounding boxes
-        person_bboxes = _detect_people_bboxes(img)
-        if not person_bboxes:
-            print("ℹ️ No people detected by YOLO")
-            return None
-        
-        # Step 2: Use SAM with bounding box prompts to get precise masks
-        candidate_masks = _get_sam_masks_from_bboxes(img, person_bboxes)
+        # Step 1 & 2 Combined: Use YOLOv8 segmentation to detect and segment people in one step
+        candidate_masks = _get_yolo_person_masks(img)
         if not candidate_masks:
-            print("ℹ️ SAM failed to generate masks from person bboxes")
+            print("ℹ️ No people detected by YOLOv8 segmentation")
             return None
         # Union all candidate masks
         union_mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
         for m in candidate_masks:
             union_mask |= (m > 0).astype(np.uint8) * 255
-        union_mask = _dilate_mask_binary(union_mask, kernel_size=15)
-        used_pipeline = None
-        if inpaint_img_with_lama is not None and _lama_config_path and _lama_ckpt_dir:
+        union_mask = _dilate_mask_binary(union_mask, kernel_size=11)
+        
+        # Step 3: Use Stable Diffusion for inpainting with ROI crop for speed
+        inpainted = None
+        if _sd_inpaint_pipeline is not None:
             try:
-                # Patch torch.load to ensure weights_only=False for PyTorch >=2.6
-                import torch as _torch  # type: ignore
-                from torch import serialization as _tser  # type: ignore
-                import pytorch_lightning.callbacks.model_checkpoint as _pl_mc  # type: ignore
+                import time
+                pil_image_full = Image.fromarray(img)
+                pil_mask_full = Image.fromarray(union_mask)
 
-                _orig_load = _torch.load
-                def _patched_load(*args, **kwargs):
-                    kwargs.setdefault('weights_only', False)
-                    return _orig_load(*args, **kwargs)
+                # Compute ROI from mask to avoid processing the whole image
+                ys, xs = np.where(union_mask > 0)
+                if len(xs) == 0 or len(ys) == 0:
+                    return None
+                x1, x2 = int(xs.min()), int(xs.max())
+                y1, y2 = int(ys.min()), int(ys.max())
 
-                inpainted = None
-                try:
-                    _tser.add_safe_globals([_pl_mc.ModelCheckpoint])  # allowlist PL checkpoint
-                except Exception:
-                    pass
+                # Pad ROI a bit
+                pad = int(0.12 * max(pil_image_full.size[0], pil_image_full.size[1]))
+                x1 = max(0, x1 - pad)
+                y1 = max(0, y1 - pad)
+                x2 = min(pil_image_full.size[0], x2 + pad)
+                y2 = min(pil_image_full.size[1], y2 + pad)
 
-                try:
-                    _torch.load = _patched_load  # monkeypatch during IA call
-                    inpainted = inpaint_img_with_lama(
-                        img, union_mask, _lama_config_path, _lama_ckpt_dir, device=_device_str
-                    )
-                    used_pipeline = 'ia_lama'
-                finally:
-                    _torch.load = _orig_load
-            except Exception as e:
-                print(f"⚠️ Inpaint-Anything LaMa failed: {e}. Falling back to native LaMa if available.")
-                inpainted = None
+                # Crop ROI
+                pil_image_roi = pil_image_full.crop((x1, y1, x2, y2))
+                pil_mask_roi = pil_mask_full.crop((x1, y1, x2, y2))
 
-        if inpainted is None and _lama_model is None and _lama_config_path and _lama_ckpt_dir:
-            # Try lazy-initialize native LaMa now for fallback
-            try:
-                from omegaconf import OmegaConf  # type: ignore
-                from saicinpainting.training.trainers import load_checkpoint  # type: ignore
-                from torch.serialization import add_safe_globals  # type: ignore
-                import pytorch_lightning.callbacks.model_checkpoint as pl_mc  # type: ignore
-                add_safe_globals([pl_mc.ModelCheckpoint])
-                cfg = OmegaConf.load(_lama_config_path)
-                globals()['_lama_model'] = load_checkpoint(cfg, _lama_ckpt_dir, strict=False, map_location=_device_str)
-                globals()['_lama_model'].freeze()
-                globals()['_lama_model'].to(_device_str)
-                print("✅ Lazy-initialized native LaMa model for fallback")
-            except Exception as e:
-                print(f"⚠️ Lazy native LaMa init failed: {e}")
+                # Resize ROI directly to 512x512 (no letterbox) to avoid border lines
+                target_size = 512
+                image_512 = pil_image_roi.resize((target_size, target_size), Image.BICUBIC)
+                # Use NEAREST for mask to keep hard edges; we'll feather later
+                mask_512 = pil_mask_roi.resize((target_size, target_size), Image.NEAREST)
 
-        if inpainted is None and _lama_model is not None:
-            # Native LaMa run
-            try:
-                import torch  # type: ignore
-                from saicinpainting.evaluation.utils import move_to_device  # type: ignore
-                from saicinpainting.evaluation.data import pad_img_to_modulo  # type: ignore
-                img_padded, _ = pad_img_to_modulo(img, 8)
-                mask_padded, _ = pad_img_to_modulo(union_mask[..., None], 8)
-                mask_padded = mask_padded[..., 0]
-                img_t = torch.from_numpy(img_padded).permute(2, 0, 1).float()[None] / 255.0
-                mask_t = torch.from_numpy(mask_padded[None, None].astype(np.float32))
-                batch = move_to_device({"image": img_t, "mask": mask_t}, _device_str)
+                # Inference (fast settings)
+                start_time = time.time()
                 with torch.no_grad():
-                    res = _lama_model(batch)
-                out = res.get('inpainted') or res.get('output') or res.get('predicted_image')
-                if isinstance(out, (list, tuple)):
-                    out = out[0]
-                out_img = (out[0].permute(1, 2, 0).clamp(0, 1).cpu().numpy() * 255.0).astype(np.uint8)
-                h, w = img.shape[:2]
-                inpainted = out_img[:h, :w]
-                used_pipeline = 'native_lama'
+                    result = _sd_inpaint_pipeline(
+                        prompt="empty hallway, clean indoor space",
+                        image=image_512,
+                        mask_image=mask_512,
+                        num_inference_steps=8,
+                        guidance_scale=3.0,
+                        strength=1.0,
+                    )
+                inference_time = time.time() - start_time
+
+                # Take output and resize back to ROI size
+                out_512 = result.images[0]
+                out_roi = out_512.resize((x2 - x1, y2 - y1), Image.BICUBIC)
+
+                # Paste back into original using a feathered mask to avoid seams/lines
+                composed = pil_image_full.copy()
+                from PIL import ImageFilter
+                paste_mask = pil_mask_roi.resize((x2 - x1, y2 - y1), Image.LANCZOS).convert("L")
+                paste_mask = paste_mask.filter(ImageFilter.GaussianBlur(5))
+                composed.paste(out_roi, (x1, y1), mask=paste_mask)
+
+                inpainted = np.array(composed)
+                used_pipeline = 'stable_diffusion'
+                print(f"✅ Inpainted using SD1.5 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)})")
+
             except Exception as e:
-                print(f"⚠️ Native LaMa inference failed: {e}")
-                return None
+                print(f"⚠️ Stable Diffusion inpainting failed: {e}")
+                inpainted = None
+        else:
+            print("⚠️ Stable Diffusion not available for inpainting")
+        
         if inpainted is None:
+            print("⚠️ All inpainting methods failed, using original image")
             return None
         return Image.fromarray(inpainted)
     except Exception as e:
         print(f"⚠️ Inpainting failed, forwarding original image. Reason: {e}")
         return None
 
+def initialize_vitl14_model():
+    """Initialize CLIP ViT-L/14 model for better hallway discrimination"""
+    global clip_vitl14_model, clip_vitl14_preprocess, clip_vitl14_tokenizer
+    
+    if not VITL14_AVAILABLE:
+        return False
+        
+    try:
+        print(f"🔄 Loading CLIP ViT-L/14 model on {_device_str}...")
+        
+        # Load ViT-L/14 model from OpenAI
+        clip_vitl14_model, _, clip_vitl14_preprocess = open_clip.create_model_and_transforms(
+            'ViT-L-14', 
+            pretrained='openai',
+            device=_device_str
+        )
+        
+        clip_vitl14_tokenizer = open_clip.get_tokenizer('ViT-L-14')
+        
+        print(f"✅ CLIP ViT-L/14 model loaded successfully on {_device_str}")
+        print(f"📊 Model parameters: ~427M (much better hallway discrimination)")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to load CLIP ViT-L/14 model: {e}")
+        return False
+
 def initialize_clip_client():
-    """Initialize the CLIP client connection"""
+    """Initialize the CLIP client connection (fallback)"""
     global clip_client
     try:
         # Connect to the local GRPC CLIP server
@@ -433,13 +569,51 @@ def initialize_clip_client():
         print(f"❌ Failed to connect to CLIP server: {e}")
         return False
 
+def encode_with_vitl14(pil_image: Image.Image) -> List[float]:
+    """Encode image using ViT-L/14 model"""
+    global clip_vitl14_model, clip_vitl14_preprocess
+    
+    if clip_vitl14_model is None:
+        raise Exception("ViT-L/14 model not loaded")
+    
+    # Preprocess and encode
+    image_tensor = clip_vitl14_preprocess(pil_image).unsqueeze(0).to(_device_str)
+    
+    with torch.no_grad():
+        features = clip_vitl14_model.encode_image(image_tensor)
+        features = features / features.norm(dim=-1, keepdim=True)
+    
+    return features.cpu().numpy().flatten().tolist()
+
+def encode_text_with_vitl14(text: str) -> List[float]:
+    """Encode text using ViT-L/14 model"""
+    global clip_vitl14_model, clip_vitl14_tokenizer
+    
+    if clip_vitl14_model is None:
+        raise Exception("ViT-L/14 model not loaded")
+    
+    # Tokenize and encode
+    text_tokens = clip_vitl14_tokenizer([text]).to(_device_str)
+    
+    with torch.no_grad():
+        features = clip_vitl14_model.encode_text(text_tokens)
+        features = features / features.norm(dim=-1, keepdim=True)
+    
+    return features.cpu().numpy().flatten().tolist()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application lifespan events"""
-    # Startup
-    success = initialize_clip_client()
-    if not success:
-        print("⚠️  CLIP server not available. Make sure it's running on port 51000")
+    # Startup - Try ViT-L/14 first, fallback to GRPC client
+    vitl14_success = initialize_vitl14_model()
+    if not vitl14_success:
+        print("⚠️ ViT-L/14 model failed to load, trying GRPC client fallback...")
+        clip_success = initialize_clip_client()
+        if not clip_success:
+            print("⚠️ Both ViT-L/14 and GRPC CLIP server failed. Some endpoints may not work.")
+    else:
+        print("✅ Using ViT-L/14 model for better hallway discrimination")
+    
     # Initialize SAM + LaMa (optional)
     try:
         inpaint_ok = initialize_inpaint_models()
@@ -476,87 +650,102 @@ class InpaintPreviewRequest(BaseModel):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    global clip_client
-    if clip_client is None:
-        raise HTTPException(status_code=503, detail="CLIP server not connected")
+    global clip_vitl14_model, clip_client
     
-    try:
-        # Test the connection with a simple encode
-        result = clip_client.encode(['test'])
-        return {"status": "healthy", "message": "CLIP server is accessible"}
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=f"CLIP server error: {str(e)}")
+    # Check ViT-L/14 first (preferred)
+    if clip_vitl14_model is not None:
+        return {
+            "status": "healthy", 
+            "message": "CLIP ViT-L/14 server is ready",
+            "model": "ViT-L/14",
+            "device": _device_str,
+            "parameters": "~427M",
+            "features": ["SAM", "Stable Diffusion", "YOLO"]
+        }
+    
+    # Fallback to GRPC client
+    elif clip_client is not None:
+        try:
+            # Test the connection with a simple encode
+            result = clip_client.encode(['test'])
+            return {"status": "healthy", "message": "CLIP server is accessible"}
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"CLIP server error: {str(e)}")
+    
+    else:
+        raise HTTPException(status_code=503, detail="No CLIP model available")
 
 @app.post("/encode", response_model=EmbeddingResponse)
 async def encode_image(image: UploadFile = File(...)):
-    """Encode an uploaded image using CLIP"""
-    global clip_client
-    
-    if clip_client is None:
-        raise HTTPException(status_code=503, detail="CLIP server not connected")
+    """Encode an uploaded image using CLIP (ViT-L/14 preferred, fallback to GRPC)"""
+    global clip_vitl14_model, clip_client
     
     try:
-        # Read the image data
+        # Read and process image
         image_data = await image.read()
-        
-        # Convert to PIL Image
         pil_image = Image.open(io.BytesIO(image_data))
         
         # Convert to RGB if needed
         if pil_image.mode != 'RGB':
             pil_image = pil_image.convert('RGB')
         
-        # Resize to 224x224 (CLIP standard)
-        pil_image = pil_image.resize((224, 224))
+        # Try ViT-L/14 first (better hallway discrimination)
+        if clip_vitl14_model is not None:
+            embedding = encode_with_vitl14(pil_image)
+            return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
         
-        # Save to temporary file (CLIP client expects file paths)
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
-            pil_image.save(tmp_file.name, format='JPEG', quality=95)
-            temp_path = tmp_file.name
-        
-        try:
-            # Encode with CLIP using file path
-            result = clip_client.encode([temp_path])
-        finally:
-            # Clean up temporary file
-            try:
-                os.unlink(temp_path)
-            except:
-                pass
-        
-        # Extract the embedding - CLIP client returns numpy array directly
-        embedding = None
-        
-        if isinstance(result, np.ndarray):
-            # For single image, result is 2D array [1, embedding_dim]
-            if len(result.shape) == 2 and result.shape[0] == 1:
-                embedding = result[0].tolist()
-            # For single image, result is 1D array [embedding_dim]
-            elif len(result.shape) == 1:
-                embedding = result.tolist()
-            else:
-                embedding = result.flatten().tolist()
-        elif isinstance(result, list) and len(result) > 0:
-            # Handle case where result is a list
-            if isinstance(result[0], np.ndarray):
-                embedding = result[0].flatten().tolist()
-            else:
-                embedding = np.array(result[0]).flatten().tolist()
-        else:
-            # Last resort - try to convert result directly
-            embedding = np.array(result).flatten().tolist()
-        
-        if embedding is None or len(embedding) == 0:
-            raise Exception("Failed to extract embedding from CLIP result")
+        # Fallback to GRPC client
+        elif clip_client is not None:
+            # Resize to 224x224 (CLIP standard)
+            pil_image = pil_image.resize((224, 224))
             
-        return EmbeddingResponse(
-            embedding=embedding,
-            dimensions=len(embedding)
-        )
+            # Save to temporary file (CLIP client expects file paths)
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
+                pil_image.save(tmp_file.name, format='JPEG', quality=95)
+                temp_path = tmp_file.name
+            
+            try:
+                # Encode with CLIP using file path
+                result = clip_client.encode([temp_path])
+            finally:
+                # Clean up temporary file
+                try:
+                    os.unlink(temp_path)
+                except:
+                    pass
+        
+            # Extract the embedding - CLIP client returns numpy array directly
+            embedding = None
+            
+            if isinstance(result, np.ndarray):
+                # For single image, result is 2D array [1, embedding_dim]
+                if len(result.shape) == 2 and result.shape[0] == 1:
+                    embedding = result[0].tolist()
+                # For single image, result is 1D array [embedding_dim]
+                elif len(result.shape) == 1:
+                    embedding = result.tolist()
+                else:
+                    embedding = result.flatten().tolist()
+            elif isinstance(result, list) and len(result) > 0:
+                # Handle case where result is a list
+                if isinstance(result[0], np.ndarray):
+                    embedding = result[0].flatten().tolist()
+                else:
+                    embedding = np.array(result[0]).flatten().tolist()
+            else:
+                # Last resort - try to convert result directly
+                embedding = np.array(result).flatten().tolist()
+            
+            if embedding is None or len(embedding) == 0:
+                raise Exception("Failed to extract embedding from CLIP result")
+                
+            return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
+        
+        else:
+            raise HTTPException(status_code=503, detail="No CLIP model available")
         
     except Exception as e:
         print(f"Error encoding image: {e}")
-        print(f"Error type: {type(e)}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to encode image: {str(e)}")
@@ -564,14 +753,15 @@ async def encode_image(image: UploadFile = File(...)):
 
 @app.post("/encode/inpainted", response_model=EmbeddingResponse)
 async def encode_image_inpainted(image: UploadFile = File(...)):
-    """Inpaint likely people using SAM+LaMa before encoding with CLIP.
+    """Inpaint likely people using SAM+Stable Diffusion before encoding with CLIP ViT-L/14.
 
     Falls back to original image if inpainting is unavailable or fails.
     """
-    global clip_client
+    global clip_vitl14_model, clip_client
 
-    if clip_client is None:
-        raise HTTPException(status_code=503, detail="CLIP server not connected")
+    # Check if any CLIP model is available
+    if clip_vitl14_model is None and clip_client is None:
+        raise HTTPException(status_code=503, detail="No CLIP model available")
 
     try:
         # Read the image data
@@ -580,43 +770,50 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
         # Try inpainting pipeline
         pil_image = inpaint_people_from_image_bytes(image_data) or Image.open(io.BytesIO(image_data)).convert("RGB")
 
-        # Resize for CLIP
-        pil_image = pil_image.resize((224, 224))
+        # Use ViT-L/14 if available, otherwise fallback to GRPC client
+        if clip_vitl14_model is not None:
+            embedding = encode_with_vitl14(pil_image)
+            return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
+        elif clip_client is not None:
+            # Resize for CLIP
+            pil_image = pil_image.resize((224, 224))
 
-        # Encode via file path
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
-            pil_image.save(tmp_file.name, format='JPEG', quality=95)
-            temp_path = tmp_file.name
+            # Encode via file path
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp_file:
+                pil_image.save(tmp_file.name, format='JPEG', quality=95)
+                temp_path = tmp_file.name
 
-        try:
-            result = clip_client.encode([temp_path])
-        finally:
             try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
+                result = clip_client.encode([temp_path])
+            finally:
+                try:
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
 
-        # Extract embedding
-        embedding = None
-        if isinstance(result, np.ndarray):
-            if len(result.shape) == 2 and result.shape[0] == 1:
-                embedding = result[0].tolist()
-            elif len(result.shape) == 1:
-                embedding = result.tolist()
+            # Extract embedding
+            embedding = None
+            if isinstance(result, np.ndarray):
+                if len(result.shape) == 2 and result.shape[0] == 1:
+                    embedding = result[0].tolist()
+                elif len(result.shape) == 1:
+                    embedding = result.tolist()
+                else:
+                    embedding = result.flatten().tolist()
+            elif isinstance(result, list) and len(result) > 0:
+                if isinstance(result[0], np.ndarray):
+                    embedding = result[0].flatten().tolist()
+                else:
+                    embedding = np.array(result[0]).flatten().tolist()
             else:
-                embedding = result.flatten().tolist()
-        elif isinstance(result, list) and len(result) > 0:
-            if isinstance(result[0], np.ndarray):
-                embedding = result[0].flatten().tolist()
-            else:
-                embedding = np.array(result[0]).flatten().tolist()
+                embedding = np.array(result).flatten().tolist()
+
+            if embedding is None or len(embedding) == 0:
+                raise Exception("Failed to extract embedding from CLIP result")
+
+            return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
         else:
-            embedding = np.array(result).flatten().tolist()
-
-        if embedding is None or len(embedding) == 0:
-            raise Exception("Failed to extract embedding from CLIP result")
-
-        return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
+            raise HTTPException(status_code=503, detail="No CLIP model available")
     except Exception as e:
         print(f"Error inpaint-encoding image: {e}")
         import traceback
@@ -626,7 +823,7 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
 
 @app.post("/encode/preprocessed", response_model=EmbeddingResponse)
 async def encode_image_preprocessed(image: UploadFile = File(...)):
-    """Alias for clients expecting /encode/preprocessed."""
+    """Alias for clients expecting /encode/preprocessed - uses ViT-L/14 with Stable Diffusion inpainting."""
     return await encode_image_inpainted(image)
 
 
@@ -717,7 +914,7 @@ async def root():
         "version": "1.0.0",
         "devices": {
             "sam_device": _device_str,
-            "lama_device": _device_str,
+            "stable_diffusion_device": _device_str,
             "sam_model_type": _sam_model_type_used,
             "sam_ckpt": _sam_ckpt_used,
         },
@@ -725,16 +922,16 @@ async def root():
             "health": "/health",
             "encode_image": "/encode (POST with image file)",
             "encode_text": "/encode/text (POST with JSON body)",
-            "encode_image_inpainted": "/encode/inpainted (POST with image file; SAM+LaMa preprocessed)"
+            "encode_image_inpainted": "/encode/inpainted (POST with image file; SAM+Stable Diffusion preprocessed)"
         }
     }
 
 if __name__ == "__main__":
-    print("🚀 Starting CLIP HTTP Gateway...")
-    print("📡 This will connect to CLIP server at grpc://127.0.0.1:51000")
-    print("🌐 HTTP API will be available at http://127.0.0.1:8000")
-    print("\nMake sure your CLIP server is running first!")
-    print("Start it with: python -m clip_server")
+    print("🚀 Starting CLIP ViT-L/14 HTTP Gateway...")
+    print("🤖 Direct ViT-L/14 model integration (no external server needed)")
+    print("🌐 HTTP API will be available at http://192.168.0.104:8000")
+    print("🎯 Features: ViT-L/14 + SAM + Stable Diffusion + YOLO (LaMa removed)")
+    print("📊 768-dimensional embeddings for better hallway discrimination")
     print()
     
     uvicorn.run(

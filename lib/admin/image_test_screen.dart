@@ -19,95 +19,170 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
   String _statusMessage = '';
   Map<String, dynamic>? _processingStats;
   final ImagePicker _picker = ImagePicker();
+  bool _showOverlayCompare = false;
+  double _overlayOpacity = 0.5;
   
   // Server configuration - use network IP for mobile access
-  static const String _serverHost = '192.168.0.103'; // Your PC's IP address
-  static const int _serverPort = 8004;
+  static const String _serverHost = '192.168.0.104'; // Your PC's IP address
+  static const int _serverPort = 8000; // Use the CLIP gateway port
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final isTablet = screenWidth > 600;
+    final isLargeTablet = screenWidth > 900;
+    
+    // Calculate responsive values
+    final horizontalPadding = isLargeTablet ? 48.0 : (isTablet ? 32.0 : 16.0);
+    final verticalPadding = isTablet ? 24.0 : 16.0;
+    final bottomSafeArea = mediaQuery.padding.bottom;
+    final hasBottomNavigation = bottomSafeArea > 0;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Image Processing Test'),
+        title: Text(
+          'Image Processing Test',
+          style: TextStyle(
+            fontSize: isTablet ? 22 : 20,
+          ),
+        ),
         backgroundColor: Colors.blue,
         foregroundColor: Colors.white,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header Info
-            Card(
-              color: Colors.blue.shade50,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  children: [
-                    const Icon(Icons.science, size: 48, color: Colors.blue),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'People Removal Test',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Upload an image to test the crowd removal AI',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey.shade700,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.only(
+            left: horizontalPadding,
+            right: horizontalPadding,
+            top: verticalPadding,
+            bottom: hasBottomNavigation ? verticalPadding + 16 : verticalPadding,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: isLargeTablet ? 1000 : double.infinity,
             ),
-            
-            const SizedBox(height: 20),
-            
-            // Upload Button
-            ElevatedButton.icon(
-              onPressed: _isProcessing ? null : _pickImage,
-              icon: const Icon(Icons.upload),
-              label: const Text('Select Image'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-              ),
-            ),
-            
-            const SizedBox(height: 20),
-            
-            // Selected Image Preview
-            if (_selectedImage != null) ...[
-              const Text(
-                'Original Image:',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.file(
-                    _selectedImage!,
-                    fit: BoxFit.contain,
-                    width: double.infinity,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Header Info
+                Card(
+                  color: Colors.blue.shade50,
+                  elevation: isTablet ? 4 : 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(isTablet ? 16 : 12),
+                  ),
+                  child: Padding(
+                    padding: EdgeInsets.all(isTablet ? 24.0 : 16.0),
+                    child: Column(
+                      children: [
+                        Icon(Icons.science, size: isTablet ? 64 : 48, color: Colors.blue),
+                        SizedBox(height: isTablet ? 12 : 8),
+                        Text(
+                          'People Removal Test',
+                          style: TextStyle(
+                            fontSize: isTablet ? 24 : 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        SizedBox(height: isTablet ? 12 : 8),
+                        Text(
+                          'Upload an image to test SAM + LaMa inpainting',
+                          style: TextStyle(
+                            fontSize: isTablet ? 16 : 14,
+                            color: Colors.grey.shade700,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                
+                SizedBox(height: isTablet ? 32 : 20),
+                
+                // Upload Button
+                ElevatedButton.icon(
+                  onPressed: _isProcessing ? null : _pickImage,
+                  icon: Icon(Icons.upload, size: isTablet ? 24 : 20),
+                  label: Text(
+                    'Select Image',
+                    style: TextStyle(fontSize: isTablet ? 18 : 16),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    padding: EdgeInsets.symmetric(
+                      vertical: isTablet ? 20 : 16,
+                      horizontal: isTablet ? 24 : 16,
+                    ),
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                    ),
+                  ),
+                ),
+            
+            const SizedBox(height: 20),
+            
+            // Selected Image & Process Button
+            if (_selectedImage != null) ...[
+              // Side-by-side original and processed preview when available
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Original', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Container(
+                          height: 200,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(_selectedImage!, fit: BoxFit.contain, width: double.infinity),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        const Text('Processed', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Container(
+                          height: 200,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.green.shade300),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: _processedImageBytes == null
+                                ? Container(
+                                    alignment: Alignment.center,
+                                    child: Text(
+                                      _isProcessing ? 'Processing…' : 'No result yet',
+                                      style: TextStyle(color: Colors.grey.shade600),
+                                    ),
+                                  )
+                                : Image.memory(_processedImageBytes!, fit: BoxFit.contain, width: double.infinity),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               
               // Process Button
               ElevatedButton.icon(
@@ -182,29 +257,46 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
               ),
             ],
             
-            // Processed Image Result
-            if (_processedImageBytes != null) ...[
+            // Overlay compare (processed over original)
+            if (_selectedImage != null && _processedImageBytes != null) ...[
               const SizedBox(height: 20),
-              const Text(
-                'Processed Image (People Removed):',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Overlay compare'),
+                subtitle: const Text('Blend processed over original to inspect differences'),
+                value: _showOverlayCompare,
+                onChanged: (v) => setState(() => _showOverlayCompare = v),
               ),
-              const SizedBox(height: 8),
-              Container(
-                height: 200,
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.green.shade300),
-                  borderRadius: BorderRadius.circular(8),
+              if (_showOverlayCompare) ...[
+                Slider(
+                  value: _overlayOpacity,
+                  onChanged: (v) => setState(() => _overlayOpacity = v),
+                  min: 0.0,
+                  max: 1.0,
+                  divisions: 10,
+                  label: 'Opacity: ${(_overlayOpacity * 100).round()}%'
                 ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.memory(
-                    _processedImageBytes!,
-                    fit: BoxFit.contain,
-                    width: double.infinity,
+                Container(
+                  height: 220,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.blue.shade200),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.file(_selectedImage!, fit: BoxFit.contain),
+                        Opacity(
+                          opacity: _overlayOpacity,
+                          child: Image.memory(_processedImageBytes!, fit: BoxFit.contain),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
+              ],
             ],
             
             const SizedBox(height: 20),
@@ -219,7 +311,9 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                 ),
               ),
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -302,30 +396,20 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
         _statusMessage = 'Sending image to server... (${imageBytes.length} bytes)';
       });
 
-      print('Sending request to: http://$_serverHost:$_serverPort/process_frame');
-      print('Image size: ${imageBytes.length} bytes');
-      print('Base64 size: ${base64Image.length} characters');
-
-      // Send to processing server
+      // Send to inpaint preview endpoint
       final response = await http.post(
-        Uri.parse('http://$_serverHost:$_serverPort/process_frame'),
+        Uri.parse('http://$_serverHost:$_serverPort/inpaint/preview'),
         headers: {
           'Content-Type': 'application/json',
         },
         body: json.encode({
           'image': base64Image,
         }),
-      ).timeout(const Duration(seconds: 30));
-
-      print('Response status: ${response.statusCode}');
-      print('Response body length: ${response.body.length}');
+      ).timeout(const Duration(seconds: 120));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         
-        print('Response data keys: ${data.keys.toList()}');
-        
-        // Check if processed_image exists
         if (!data.containsKey('processed_image')) {
           setState(() {
             _statusMessage = 'Error: Server response missing processed_image';
@@ -336,16 +420,14 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
         
         // Decode processed image
         final processedImageBytes = base64Decode(data['processed_image']);
+        final usedFallback = (data['fallback'] == true);
         
         setState(() {
           _processedImageBytes = processedImageBytes;
-          _processingStats = {
-            'crowd_density': data['crowd_density'] ?? 0.0,
-            'processing_mode': data['processing_mode'] ?? 'unknown',
-            'processing_time': data['processing_time'] ?? 0.0,
-            'average_fps': data['average_fps'] ?? 0.0,
-          };
-          _statusMessage = 'Processing completed successfully! Processed ${processedImageBytes.length} bytes';
+          _processingStats = null;
+          _statusMessage = usedFallback 
+              ? 'Processing completed (fallback to original - inpainting unavailable).'
+              : 'Processing completed successfully!';
           _isProcessing = false;
         });
       } else {

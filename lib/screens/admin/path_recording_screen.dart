@@ -363,10 +363,21 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final screenHeight = mediaQuery.size.height;
+    final isTablet = screenWidth > 600;
+    final isLandscape = screenWidth > screenHeight;
+    final bottomSafeArea = mediaQuery.padding.bottom;
+    final hasBottomNavigation = bottomSafeArea > 0;
+
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Path Recording'),
+          title: Text(
+            'Path Recording',
+            style: TextStyle(fontSize: isTablet ? 22 : 20),
+          ),
           backgroundColor: Colors.teal,
         ),
         body: const Center(
@@ -385,7 +396,10 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     if (!_cameraController.value.isInitialized) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Path Recording'),
+          title: Text(
+            'Path Recording',
+            style: TextStyle(fontSize: isTablet ? 22 : 20),
+          ),
           backgroundColor: Colors.teal,
         ),
         body: const Center(
@@ -403,7 +417,10 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Record Path'),
+        title: Text(
+          isTablet ? '${widget.startLocationName} → ${widget.endLocationName}' : 'Record Path',
+          style: TextStyle(fontSize: isTablet ? 20 : 18),
+        ),
         backgroundColor: Colors.teal,
         actions: [
           if (_isRecording && !_isPaused)
@@ -420,14 +437,15 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
             ),
         ],
       ),
-      body: Column(
-        children: [
-          // Camera preview
-          Expanded(
-            flex: 3,
-            child: Stack(
-              children: [
-                CameraPreview(_cameraController),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Camera preview - responsive flex ratios
+            Expanded(
+              flex: isLandscape ? 2 : (isTablet ? 3 : 3),
+              child: Stack(
+                children: [
+                  CameraPreview(_cameraController),
                 
                 // Recording overlay
                 if (_isRecording)
@@ -440,14 +458,14 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
                           Icon(
                             _isPaused ? Icons.pause_circle : Icons.fiber_manual_record,
                             color: _isPaused ? Colors.orange : Colors.red,
-                            size: 60,
+                            size: isTablet ? 80 : 60,
                           ),
-                          const SizedBox(height: 10),
+                          SizedBox(height: isTablet ? 16 : 10),
                           Text(
                             _isPaused ? 'PAUSED' : 'RECORDING',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
-                              fontSize: 18,
+                              fontSize: isTablet ? 22 : 18,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -458,134 +476,196 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
 
                 // Status overlay (top-left)
                 Positioned(
-                  top: 20,
-                  left: 20,
+                  top: isTablet ? 24 : 20,
+                  left: isTablet ? 24 : 20,
                   child: Container(
-                    padding: const EdgeInsets.all(12),
+                    padding: EdgeInsets.all(isTablet ? 16 : 12),
                     decoration: BoxDecoration(
                       color: Colors.black54,
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(isTablet ? 16 : 10),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           "Waypoints: $_waypointCount",
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: isTablet ? 16 : 14,
+                          ),
                         ),
                         Text(
                           "Heading: ${_getDirectionName(_currentHeading)}",
-                          style: const TextStyle(color: Colors.white70),
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: isTablet ? 14 : 12,
+                          ),
                         ),
                         if (_currentHeading != null)
                           Text(
                             "${_currentHeading!.round()}°",
-                            style: const TextStyle(color: Colors.white70),
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: isTablet ? 14 : 12,
+                            ),
                           ),
                       ],
                     ),
                   ),
                 ),
-              ],
+                ],
+              ),
             ),
-          ),
 
-          // Route info
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.teal.shade50,
-            width: double.infinity,
-            child: Column(
-              children: [
-                Text(
-                  "From: ${widget.startLocationName}",
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                const Icon(Icons.arrow_downward, color: Colors.teal),
-                Text(
-                  "To: ${widget.endLocationName}",
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
-          ),
-
-          // Status message
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: Colors.teal.shade100,
-            width: double.infinity,
-            child: Text(
-              _statusMessage,
-              style: const TextStyle(fontSize: 16),
-              textAlign: TextAlign.center,
-            ),
-          ),
-
-          // Control buttons
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    if (!_isRecording)
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.play_arrow),
-                        label: const Text("Start Recording"),
-                        onPressed: _isClipServerReady ? _startRecording : null,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        ),
-                      ),
-                    
-                    if (_isRecording)
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.stop),
-                        label: const Text("Stop Recording"),
-                        onPressed: _stopRecording,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        ),
-                      ),
-                    
-                    if (_isRecording)
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.add_location),
-                        label: const Text("Add Landmark"),
-                        onPressed: _addManualWaypoint,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                        ),
-                      ),
-                  ],
-                ),
-                
-                if (!_isRecording && _waypointCount > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.save),
-                      label: const Text("Save Path"),
-                      onPressed: () => _showSavePathDialog(),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      ),
+            // Route info
+            Container(
+              padding: EdgeInsets.all(isTablet ? 20 : 16),
+              color: Colors.teal.shade50,
+              width: double.infinity,
+              child: Column(
+                children: [
+                  Text(
+                    "From: ${widget.startLocationName}",
+                    style: TextStyle(
+                      fontSize: isTablet ? 18 : 16,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
+                  Icon(
+                    Icons.arrow_downward,
+                    color: Colors.teal,
+                    size: isTablet ? 28 : 24,
+                  ),
+                  Text(
+                    "To: ${widget.endLocationName}",
+                    style: TextStyle(
+                      fontSize: isTablet ? 18 : 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Status message
+            Container(
+              padding: EdgeInsets.all(isTablet ? 20 : 16),
+              color: Colors.teal.shade100,
+              width: double.infinity,
+              child: Text(
+                _statusMessage,
+                style: TextStyle(fontSize: isTablet ? 18 : 16),
+                textAlign: TextAlign.center,
+              ),
+            ),
+
+            // Control buttons
+            Padding(
+              padding: EdgeInsets.only(
+                left: isTablet ? 24 : 16,
+                right: isTablet ? 24 : 16,
+                top: isTablet ? 24 : 16,
+                bottom: hasBottomNavigation ? (isTablet ? 32 : 24) : (isTablet ? 24 : 16),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      if (!_isRecording)
+                        ElevatedButton.icon(
+                          icon: Icon(Icons.play_arrow, size: isTablet ? 24 : 20),
+                          label: Text(
+                            "Start Recording",
+                            style: TextStyle(fontSize: isTablet ? 16 : 14),
+                          ),
+                          onPressed: _isClipServerReady ? _startRecording : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isTablet ? 24 : 20,
+                              vertical: isTablet ? 16 : 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                            ),
+                          ),
+                        ),
+                      
+                      if (_isRecording)
+                        ElevatedButton.icon(
+                          icon: Icon(Icons.stop, size: isTablet ? 24 : 20),
+                          label: Text(
+                            "Stop Recording",
+                            style: TextStyle(fontSize: isTablet ? 16 : 14),
+                          ),
+                          onPressed: _stopRecording,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.red,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isTablet ? 24 : 20,
+                              vertical: isTablet ? 16 : 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                            ),
+                          ),
+                        ),
+                      
+                      if (_isRecording)
+                        ElevatedButton.icon(
+                          icon: Icon(Icons.add_location, size: isTablet ? 24 : 20),
+                          label: Text(
+                            "Add Landmark",
+                            style: TextStyle(fontSize: isTablet ? 16 : 14),
+                          ),
+                          onPressed: _addManualWaypoint,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isTablet ? 24 : 20,
+                              vertical: isTablet ? 16 : 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  
+                  if (!_isRecording && _waypointCount > 0)
+                    Padding(
+                      padding: EdgeInsets.only(top: isTablet ? 16 : 12),
+                      child: ElevatedButton.icon(
+                        icon: Icon(Icons.save, size: isTablet ? 24 : 20),
+                        label: Text(
+                          "Save Path",
+                          style: TextStyle(fontSize: isTablet ? 16 : 14),
+                        ),
+                        onPressed: () => _showSavePathDialog(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal,
+                          foregroundColor: Colors.white,
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isTablet ? 24 : 20,
+                            vertical: isTablet ? 16 : 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                          ),
+                        ),
+                      ),
+                    ),
               ],
             ),
           ),
         ],
+      ),
       ),
     );
   }

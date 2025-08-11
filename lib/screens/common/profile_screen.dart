@@ -62,10 +62,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final isTablet = screenWidth > 600;
+    final isLargeTablet = screenWidth > 900;
+    
+    // Calculate responsive values
+    final horizontalPadding = isLargeTablet ? 48.0 : (isTablet ? 32.0 : 16.0);
+    final verticalPadding = isTablet ? 24.0 : 16.0;
+    final bottomSafeArea = mediaQuery.padding.bottom;
+    final hasBottomNavigation = bottomSafeArea > 0;
+
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Profile'),
+          title: Text(
+            'Profile',
+            style: TextStyle(
+              fontSize: isTablet ? 22 : 20,
+            ),
+          ),
         ),
         body: const Center(
           child: CircularProgressIndicator(),
@@ -75,49 +91,68 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Profile'),
+        title: Text(
+          'Profile',
+          style: TextStyle(
+            fontSize: isTablet ? 22 : 20,
+          ),
+        ),
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: EdgeInsets.only(
+              left: horizontalPadding,
+              right: horizontalPadding,
+              top: verticalPadding,
+              bottom: hasBottomNavigation ? verticalPadding + 16 : verticalPadding,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isLargeTablet ? 800 : double.infinity,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
               Card(
+                elevation: isTablet ? 4 : 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(isTablet ? 16 : 12),
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: EdgeInsets.all(isTablet ? 24.0 : 16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'User Information',
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: isTablet ? 22 : 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 16),
                       Row(
                         children: [
-                          const Icon(Icons.email),
-                          const SizedBox(width: 8),
+                          Icon(Icons.email, size: isTablet ? 24 : 20),
+                          SizedBox(width: isTablet ? 12 : 8),
                           Expanded(
                             child: Text(
                               _userEmail,
-                              style: const TextStyle(fontSize: 16),
+                              style: TextStyle(fontSize: isTablet ? 18 : 16),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      SizedBox(height: isTablet ? 12 : 8),
                       Row(
                         children: [
-                          const Icon(Icons.verified_user),
-                          const SizedBox(width: 8),
+                          Icon(Icons.verified_user, size: isTablet ? 24 : 20),
+                          SizedBox(width: isTablet ? 12 : 8),
                           Text(
                             _isAdmin ? 'Administrator' : 'User',
                             style: TextStyle(
-                              fontSize: 16,
+                              fontSize: isTablet ? 18 : 16,
                               color: _isAdmin ? Colors.orange : Colors.blue,
                               fontWeight: FontWeight.bold,
                             ),
@@ -128,29 +163,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
+              SizedBox(height: isTablet ? 24 : 16),
               
               // Admin-specific section
               if (_isAdmin) ...[
                 Card(
+                  elevation: isTablet ? 4 : 2,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(isTablet ? 16 : 12),
+                  ),
                   child: Padding(
-                    padding: const EdgeInsets.all(16.0),
+                    padding: EdgeInsets.all(isTablet ? 24.0 : 16.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Admin Features',
                           style: TextStyle(
-                            fontSize: 18,
+                            fontSize: isTablet ? 22 : 18,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        SizedBox(height: isTablet ? 20 : 16),
                         ListTile(
-                          leading: const Icon(Icons.admin_panel_settings),
-                          title: const Text('Admin Panel'),
-                          subtitle: const Text('Manage users and system settings'),
-                          trailing: const Icon(Icons.arrow_forward_ios),
+                          leading: Icon(Icons.admin_panel_settings, size: isTablet ? 28 : 24),
+                          title: Text(
+                            'Admin Panel',
+                            style: TextStyle(fontSize: isTablet ? 18 : 16),
+                          ),
+                          subtitle: Text(
+                            'Manage users and system settings',
+                            style: TextStyle(fontSize: isTablet ? 16 : 14),
+                          ),
+                          trailing: Icon(Icons.arrow_forward_ios, size: isTablet ? 20 : 16),
                           onTap: () {
                             Navigator.of(context).pushNamed('/admin');
                           },
@@ -159,31 +204,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                SizedBox(height: isTablet ? 24 : 16),
               ],
               
               // Sign out section
               Card(
+                elevation: isTablet ? 4 : 2,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(isTablet ? 16 : 12),
+                ),
                 child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+                  padding: EdgeInsets.all(isTablet ? 24.0 : 16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Account Actions',
                         style: TextStyle(
-                          fontSize: 18,
+                          fontSize: isTablet ? 22 : 18,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 16),
+                      SizedBox(height: isTablet ? 20 : 16),
                       ListTile(
-                        leading: const Icon(Icons.logout, color: Colors.red),
-                        title: const Text(
+                        leading: Icon(Icons.logout, color: Colors.red, size: isTablet ? 28 : 24),
+                        title: Text(
                           'Sign Out',
-                          style: TextStyle(color: Colors.red),
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: isTablet ? 18 : 16,
+                          ),
                         ),
-                        subtitle: const Text('Sign out of your account'),
+                        subtitle: Text(
+                          'Sign out of your account',
+                          style: TextStyle(fontSize: isTablet ? 16 : 14),
+                        ),
                         onTap: _signOut,
                       ),
                     ],
@@ -191,19 +246,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               
-              const Spacer(),
+              SizedBox(height: isTablet ? 40 : 24),
               
               // App info
-              const Center(
+              Center(
                 child: Text(
                   'Indoor Navigation for Visually Impaired',
                   style: TextStyle(
                     color: Colors.grey,
-                    fontSize: 12,
+                    fontSize: isTablet ? 14 : 12,
                   ),
                 ),
               ),
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),

@@ -73,8 +73,8 @@ class PositionLocalizationService {
   /// Localize user position based on captured embeddings
   Future<LocationMatch?> localizePosition(File imageFile) async {
     try {
-      // Generate embedding for the current image
-      final currentEmbedding = await _clipService.generateImageEmbedding(imageFile);
+      // Generate embedding for the current image with people removal preprocessing
+      final currentEmbedding = await _clipService.generatePreprocessedEmbedding(imageFile);
       
       // Get all available nodes with embeddings from database
       final allNodes = await _getAllNodesWithEmbeddings();

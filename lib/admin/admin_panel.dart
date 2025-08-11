@@ -122,6 +122,17 @@ class _AdminPanelState extends State<AdminPanel> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => Navigator.pushNamed(context, '/image_test'),
+                        icon: const Icon(Icons.image_search),
+                        label: const Text('Image Test'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ],

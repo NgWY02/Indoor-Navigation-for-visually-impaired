@@ -278,7 +278,7 @@ class ContinuousPathRecorder {
       }
       
       final File imageFile = File(image.path);
-      final List<double> embedding = await _clipService.generateImageEmbedding(imageFile);
+      final List<double> embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
       
       // Calculate REAL distance from previous waypoint using step counter
       double? distanceFromPrevious;

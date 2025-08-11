@@ -95,59 +95,108 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenWidth = mediaQuery.size.width;
+    final isTablet = screenWidth > 600;
+    final isLargeTablet = screenWidth > 900;
+    
+    // Calculate responsive values
+    final horizontalPadding = isLargeTablet ? 48.0 : (isTablet ? 32.0 : 16.0);
+    final verticalPadding = isTablet ? 24.0 : 16.0;
+    final bottomSafeArea = mediaQuery.padding.bottom;
+    final hasBottomNavigation = bottomSafeArea > 0;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Register'),
+        title: Text(
+          'Register',
+          style: TextStyle(
+            fontSize: isTablet ? 22 : 20,
+          ),
+        ),
       ),
-      body: Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Icon(
-                  Icons.person_add,
-                  size: 80,
-                  color: Colors.blue,
-                ),
-                const SizedBox(height: 32),
-                const Text(
-                  'Create an Account',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 32),
-                if (_errorMessage != null)
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    color: Colors.red[100],
-                    child: Text(
-                      _errorMessage!,
-                      style: const TextStyle(color: Colors.red),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: EdgeInsets.only(
+              left: horizontalPadding,
+              right: horizontalPadding,
+              top: verticalPadding,
+              bottom: hasBottomNavigation ? verticalPadding + 16 : verticalPadding,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isLargeTablet ? 600 : double.infinity,
+              ),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Icon(
+                      Icons.person_add,
+                      size: isTablet ? 100 : 80,
+                      color: Colors.blue,
                     ),
-                  ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _nameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Full Name',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.person),
-                  ),
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your name';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
+                    SizedBox(height: isTablet ? 40 : 32),
+                    Text(
+                      'Create an Account',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: isTablet ? 28 : 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    SizedBox(height: isTablet ? 40 : 32),
+                    if (_errorMessage != null)
+                      Container(
+                        padding: EdgeInsets.all(isTablet ? 12 : 8),
+                        decoration: BoxDecoration(
+                          color: Colors.red[100],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.error_outline, color: Colors.red.shade700),
+                            SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _errorMessage!,
+                                style: TextStyle(
+                                  color: Colors.red.shade900,
+                                  fontSize: isTablet ? 16 : 14,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    SizedBox(height: isTablet ? 20 : 16),
+                    TextFormField(
+                      controller: _nameController,
+                      style: TextStyle(fontSize: isTablet ? 18 : 16),
+                      decoration: InputDecoration(
+                        labelText: 'Full Name',
+                        labelStyle: TextStyle(fontSize: isTablet ? 16 : 14),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                        ),
+                        prefixIcon: Icon(Icons.person, size: isTablet ? 24 : 20),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: isTablet ? 16 : 12,
+                          vertical: isTablet ? 20 : 16,
+                        ),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your name';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: isTablet ? 20 : 16),
                 TextFormField(
                   controller: _emailController,
                   decoration: const InputDecoration(
@@ -245,24 +294,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ],
                   ),
                 
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: _isLoading ? null : _signUp,
-                  child: _isLoading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Register'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                  ),
+                    SizedBox(height: isTablet ? 32 : 24),
+                    ElevatedButton(
+                      onPressed: _isLoading ? null : _signUp,
+                      style: ElevatedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(
+                          vertical: isTablet ? 20 : 16,
+                          horizontal: isTablet ? 24 : 16,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                        ),
+                      ),
+                      child: _isLoading
+                          ? SizedBox(
+                              height: isTablet ? 24 : 20,
+                              width: isTablet ? 24 : 20,
+                              child: const CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              'Register',
+                              style: TextStyle(
+                                fontSize: isTablet ? 18 : 16,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                    SizedBox(height: isTablet ? 20 : 16),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                      },
+                      child: Text(
+                        'Already have an account? Login',
+                        style: TextStyle(fontSize: isTablet ? 16 : 14),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop();
-                  },
-                  child: const Text('Already have an account? Login'),
-                ),
-              ],
+              ),
             ),
           ),
         ),

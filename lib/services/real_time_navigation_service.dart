@@ -150,8 +150,8 @@ class RealTimeNavigationService {
     if (_state != NavigationState.navigating || _currentRoute == null) return;
 
     try {
-      // Generate embedding for current view
-      final currentEmbedding = await _clipService.generateImageEmbedding(imageFile);
+      // Generate embedding for current view with people removal preprocessing
+      final currentEmbedding = await _clipService.generatePreprocessedEmbedding(imageFile);
       _lastCapturedEmbedding = currentEmbedding;
       
       // 🚨 FIX: Get current target waypoint by SEQUENCE NUMBER, not array index!

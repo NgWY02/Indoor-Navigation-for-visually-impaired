@@ -400,7 +400,7 @@ class VideoProcessorService {
     
     if (!_isClipServerReady) {
       print('VideoProcessor: CLIP server not ready');
-      return List.filled(512, 0.0); // Return zeros if server not ready (CLIP uses 512 dimensions)
+      return List.filled(768, 0.0); // Return zeros if server not ready (ViT-L/14 uses 768 dimensions)
     }
     
     try {
@@ -410,8 +410,8 @@ class VideoProcessorService {
         return List.filled(512, 0.0);
       }
 
-      // Use CLIP service to generate embedding
-      final embedding = await _clipService.generateImageEmbedding(imageFile);
+      // Use CLIP service to generate embedding with people removal preprocessing
+      final embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
       print('VideoProcessor: Generated CLIP embedding with ${embedding.length} dimensions');
       
       return embedding;

@@ -7,8 +7,9 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/admin/admin_home_screen.dart';
 import 'screens/common/profile_screen.dart';
 import 'services/supabase_service.dart';
-import 'auth/auth_wrapper.dart';
 import 'admin/admin_panel.dart';
+import 'admin/image_test_screen.dart';
+import 'auth/auth_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -48,13 +49,13 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      home: AuthWrapper(
-        cameras: cameras,
-      ),
+      // Use AuthWrapper for proper authentication flow
+      home: AuthWrapper(cameras: cameras),
       routes: {
         '/admin': (context) => const AdminPanel(),
         '/profile': (context) => const ProfileScreen(),
         '/admin_home': (context) => AdminHomeScreen(cameras: cameras),
+        '/image_test': (context) => const ImageTestScreen(),
       },
     );
   }

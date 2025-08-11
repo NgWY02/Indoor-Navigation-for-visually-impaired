@@ -1,31 +1,36 @@
 @echo off
-echo Starting CLIP-as-service system...
+echo Starting CLIP ViT-L/14 System for Better Hallway Navigation...
 echo.
 
-echo Step 1: Starting CLIP GRPC server...
-echo This will start the main CLIP server on port 51000
+echo Starting CLIP ViT-L/14 HTTP Gateway...
+echo This integrates ViT-L/14 + SAM + LaMa + Stable Diffusion + YOLO
 echo.
-start "CLIP Server" cmd /k "python -m clip_server"
+start "CLIP ViT-L/14 Gateway" cmd /k "conda activate inpaint && python clip_http_gateway.py"
 
-echo Waiting 10 seconds for CLIP server to initialize...
-timeout /t 10 /nobreak > nul
-
-echo.
-echo Step 2: Starting HTTP Gateway...
-echo This will start the HTTP bridge on port 8000
-echo.
-start "CLIP HTTP Gateway" cmd /k "python clip_http_gateway.py"
+echo Waiting 20 seconds for ViT-L/14 model to load...
+echo (ViT-L/14 is larger and takes longer to initialize)
+timeout /t 20 /nobreak > nul
 
 echo.
-echo ✅ Both services are starting up!
+echo ✅ CLIP ViT-L/14 system is starting up!
 echo.
-echo 📡 CLIP GRPC Server: 127.0.0.1:51000  (internal)
-echo 🌐 HTTP Gateway:     127.0.0.1:8000   (for Flutter app)
+echo 🤖 Integrated ViT-L/14 Gateway: 192.168.0.103:8000 (for Flutter app)
 echo.
-echo Your Flutter app will connect to the HTTP Gateway at port 8000
-echo which will forward requests to the CLIP server at port 51000.
+echo 🎯 ViT-L/14 Benefits:
+echo    - 427M parameters (vs 151M in ViT-B/32)
+echo    - 768-dimensional embeddings (vs 512)
+echo    - Much better discrimination for similar scenes
+echo    - Should solve hallway navigation issues
 echo.
-echo Press any key to open the services in browser for testing...
+echo 🛠️ Integrated Features:
+echo    - CLIP ViT-L/14 for embeddings
+echo    - SAM for precise segmentation
+echo    - LaMa + Stable Diffusion for inpainting
+echo    - YOLO for person detection
+echo.
+echo Your Flutter app will connect to port 8000 as before.
+echo.
+echo Press any key to test the services...
 pause
-start http://127.0.0.1:8000
-start http://127.0.0.1:8000/health
+start http://192.168.0.103:8000
+start http://192.168.0.103:8000/health

@@ -680,8 +680,8 @@ class _NavigationLocalizationScreenState
       final image = await _cameraController.takePicture();
       final File imageFile = File(image.path);
 
-      // Use CLIP service to generate embedding
-      final List<double> embedding = await _clipService.generateImageEmbedding(imageFile);
+      // Use CLIP service to generate embedding with people removal preprocessing
+      final List<double> embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
 
       _scan360Results.add({
         'embedding': embedding,

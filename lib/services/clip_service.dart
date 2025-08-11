@@ -2,10 +2,9 @@ import 'dart:io';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.102:8000'; // HTTP Gateway for CLIP server
+  static const String _defaultServerUrl = 'http://192.168.0.104:8000'; // HTTP Gateway for CLIP ViT-L/14 server
   final String serverUrl;
   
   ClipService({this.serverUrl = _defaultServerUrl});
@@ -25,37 +24,32 @@ class ClipService {
     }
   }
   
-  /// Generate embeddings for an image file using CLIP
+  /// Generate embeddings for an image file using CLIP (no preprocessing)
   Future<List<double>> generateImageEmbedding(File imageFile) async {
+    return _generateEmbedding(imageFile, '/encode');
+  }
+
+  /// Generate embeddings with people removal preprocessing (YOLO+SAM+Stable Diffusion)
+  Future<List<double>> generatePreprocessedEmbedding(File imageFile) async {
+    return _generateEmbedding(imageFile, '/encode/preprocessed');
+  }
+
+  /// Internal method for embedding generation with different endpoints
+  Future<List<double>> _generateEmbedding(File imageFile, String endpoint) async {
     try {
-      debugPrint('ClipService: Generating embedding for ${imageFile.path}');
+      debugPrint('ClipService: Generating embedding for ${imageFile.path} via $endpoint');
       
       // Check if server is available
       if (!await isServerAvailable()) {
         throw Exception('CLIP server is not available. Please start the server first.');
       }
       
-      // Read and prepare image
-      final bytes = await imageFile.readAsBytes();
-      final image = img.decodeImage(bytes);
-      
-      if (image == null) {
-        throw Exception('Failed to decode image');
-      }
-      
-      // Resize image to CLIP input size (224x224)
-      final resizedImage = img.copyResize(image, width: 224, height: 224);
-      final resizedBytes = img.encodeJpg(resizedImage, quality: 90);
+      // Read original image bytes (server will handle resize + preprocessing)
+      final originalBytes = await imageFile.readAsBytes();
       
       // Prepare request
-      final request = http.MultipartRequest('POST', Uri.parse('$serverUrl/encode'));
-      request.files.add(
-        http.MultipartFile.fromBytes(
-          'image',
-          resizedBytes,
-          filename: 'image.jpg',
-        ),
-      );
+      final request = http.MultipartRequest('POST', Uri.parse('$serverUrl$endpoint'));
+      request.files.add(http.MultipartFile.fromBytes('image', originalBytes, filename: 'image.jpg'));
       
       // Send request
       final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
@@ -78,8 +72,8 @@ class ClipService {
       
     } catch (e) {
       debugPrint('ClipService: Error generating embedding: $e');
-      // Return a zero vector as fallback (512 dimensions for CLIP)
-      return List.filled(512, 0.0);
+      // Return a zero vector as fallback (768 dimensions for ViT-L/14)
+      return List.filled(768, 0.0);
     }
   }
   
@@ -150,7 +144,7 @@ class ClipService {
       
     } catch (e) {
       debugPrint('ClipService: Error generating text embedding: $e');
-      return List.filled(512, 0.0);
+      return List.filled(768, 0.0);
     }
   }
   
