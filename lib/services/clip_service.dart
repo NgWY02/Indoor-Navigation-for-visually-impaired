@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.104:8000'; // HTTP Gateway for CLIP ViT-L/14 server
+  static const String _defaultServerUrl = 'http://192.168.0.103:8000'; // HTTP Gateway for CLIP ViT-L/14 server
   final String serverUrl;
   
   ClipService({this.serverUrl = _defaultServerUrl});
@@ -72,8 +72,9 @@ class ClipService {
       
     } catch (e) {
       debugPrint('ClipService: Error generating embedding: $e');
-      // Return a zero vector as fallback (768 dimensions for ViT-L/14)
-      return List.filled(768, 0.0);
+      // Return a zero vector as fallback (384 dimensions for DINOv2, 768 for ViT-L/14)
+      // The server will tell us the actual dimensions in the response
+      return List.filled(384, 0.0);
     }
   }
   
@@ -144,7 +145,7 @@ class ClipService {
       
     } catch (e) {
       debugPrint('ClipService: Error generating text embedding: $e');
-      return List.filled(768, 0.0);
+      return List.filled(384, 0.0);
     }
   }
   

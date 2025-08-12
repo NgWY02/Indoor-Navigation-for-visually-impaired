@@ -438,7 +438,7 @@ class ContinuousPathRecorder {
           double headingDiff = (_waypoints[i].heading - lastKept.heading).abs();
           
           // Skip if too similar and heading hasn't changed much
-          if (similarity > 0.92 && headingDiff < 10) {
+          if (similarity > 0.95 && headingDiff < 10) {
             shouldKeep = false;
             removedCount++;
             print('REMOVED waypoint ${i+1}: similarity=${similarity.toStringAsFixed(3)}, heading_diff=${headingDiff.toStringAsFixed(1)}°');
