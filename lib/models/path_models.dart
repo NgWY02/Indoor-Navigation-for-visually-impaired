@@ -27,6 +27,11 @@ class PathWaypoint {
   final double? distanceFromPrevious;
   final DateTime timestamp;
   final int sequenceNumber;
+  
+  // People detection info from recording (for smart threshold adjustment)
+  final bool peopleDetected;
+  final int peopleCount;
+  final List<double> peopleConfidenceScores;
 
   PathWaypoint({
     required this.id,
@@ -39,6 +44,9 @@ class PathWaypoint {
     this.distanceFromPrevious,
     required this.timestamp,
     required this.sequenceNumber,
+    this.peopleDetected = false,
+    this.peopleCount = 0,
+    this.peopleConfidenceScores = const [],
   });
 
   Map<String, dynamic> toJson() {
@@ -53,6 +61,9 @@ class PathWaypoint {
       'distance_from_previous': distanceFromPrevious,
       'timestamp': timestamp.toIso8601String(),
       'sequence_number': sequenceNumber,
+      'people_detected': peopleDetected,
+      'people_count': peopleCount,
+      'people_confidence_scores': peopleConfidenceScores,
     };
   }
 
@@ -68,6 +79,11 @@ class PathWaypoint {
       distanceFromPrevious: json['distance_from_previous']?.toDouble(),
       timestamp: DateTime.parse(json['timestamp']),
       sequenceNumber: json['sequence_number'],
+      peopleDetected: json['people_detected'] ?? false,
+      peopleCount: json['people_count'] ?? 0,
+      peopleConfidenceScores: json['people_confidence_scores'] != null 
+          ? List<double>.from(json['people_confidence_scores']) 
+          : [],
     );
   }
 }

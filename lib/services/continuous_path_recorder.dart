@@ -8,6 +8,33 @@ import '../services/clip_service.dart';
 import '../models/path_models.dart';
 import 'package:uuid/uuid.dart';
 
+// Raw waypoint data for batch processing
+class RawWaypointData {
+  final String id;
+  final String imagePath;
+  final double heading;
+  final double headingChange;
+  final TurnType turnType;
+  final bool isDecisionPoint;
+  final String landmarkDescription;
+  final double? distanceFromPrevious;
+  final DateTime timestamp;
+  final int sequenceNumber;
+
+  RawWaypointData({
+    required this.id,
+    required this.imagePath,
+    required this.heading,
+    required this.headingChange,
+    required this.turnType,
+    required this.isDecisionPoint,
+    required this.landmarkDescription,
+    required this.distanceFromPrevious,
+    required this.timestamp,
+    required this.sequenceNumber,
+  });
+}
+
 class ContinuousPathRecorder {
   final ClipService _clipService;
   final CameraController _cameraController;
@@ -15,6 +42,7 @@ class ContinuousPathRecorder {
   // Recording state
   bool _isRecording = false;
   List<PathWaypoint> _waypoints = [];
+  List<RawWaypointData> _rawWaypoints = []; // Store raw frames for batch processing
   Timer? _recordingTimer;
   StreamSubscription<CompassEvent>? _compassSubscription;
   
@@ -56,7 +84,7 @@ class ContinuousPathRecorder {
   // Public methods
   bool get isRecording => _isRecording;
   List<PathWaypoint> get waypoints => List.unmodifiable(_waypoints);
-  int get waypointCount => _waypoints.length;
+  int get waypointCount => _isRecording ? _rawWaypoints.length : _waypoints.length;
 
   Future<void> startRecording(String pathId) async {
     if (_isRecording) {
@@ -73,6 +101,7 @@ class ContinuousPathRecorder {
       _currentPathId = pathId;
       _isRecording = true;
       _waypoints.clear();
+      _rawWaypoints.clear();
       _sequenceNumber = 0;
       _recordingStartTime = DateTime.now();
       
@@ -135,10 +164,13 @@ class ContinuousPathRecorder {
     _pedestrianStatusSubscription = null;
 
     print('✅ All timers cancelled, processing waypoints...');
-    onStatusUpdate?.call('Recording stopped. Processing waypoints...');
+    onStatusUpdate?.call('Recording stopped. Processing ${_rawWaypoints.length} captured frames...');
     
     //Give any in-flight waypoint captures time to check the flag
     await Future.delayed(const Duration(milliseconds: 100));
+    
+    // Batch process raw waypoints with inpainting
+    await _batchProcessWaypoints();
     
     // Process and filter waypoints
     await _processRecordedWaypoints();
@@ -278,7 +310,6 @@ class ContinuousPathRecorder {
       }
       
       final File imageFile = File(image.path);
-      final List<double> embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
       
       // Calculate REAL distance from previous waypoint using step counter
       double? distanceFromPrevious;
@@ -311,10 +342,10 @@ class ContinuousPathRecorder {
         }
       }
 
-      // Create waypoint
-      final waypoint = PathWaypoint(
+      // Create raw waypoint data (no embedding yet)
+      final rawWaypoint = RawWaypointData(
         id: _uuid.v4(),
-        embedding: embedding,
+        imagePath: imageFile.path,
         heading: _normalizeHeading(_currentHeading!),
         headingChange: headingChange,
         turnType: turnType,
@@ -325,17 +356,13 @@ class ContinuousPathRecorder {
         sequenceNumber: _sequenceNumber++,
       );
 
-      _waypoints.add(waypoint);
+      _rawWaypoints.add(rawWaypoint);
       _lastHeading = _normalizeHeading(_currentHeading!);
       
-      // Clean up temp image
-      await imageFile.delete();
-      
-      // Notify callback
-      onWaypointCaptured?.call(waypoint);
+      // Don't delete image - we need it for batch processing!
       
       // Update status
-      String statusMessage = 'Waypoint ${_waypoints.length} captured';
+      String statusMessage = 'Frame ${_rawWaypoints.length} captured.';
       if (isDecisionPoint) {
         statusMessage += ' (${turnType.name} turn detected)';
       }
@@ -406,10 +433,82 @@ class ContinuousPathRecorder {
     }
   }
 
+  /// Batch process raw waypoints with inpainting
+  Future<void> _batchProcessWaypoints() async {
+    if (_rawWaypoints.isEmpty) return;
+
+    print('Batch processing ${_rawWaypoints.length} raw waypoints with inpainting...');
+    
+    _waypoints.clear(); // Clear any existing waypoints
+    
+    for (int i = 0; i < _rawWaypoints.length; i++) {
+      final rawWaypoint = _rawWaypoints[i];
+      
+      try {
+        // Update status
+        onStatusUpdate?.call('Processing frame ${i + 1}/${_rawWaypoints.length} (detecting people + inpainting)...');
+        
+        // Run people detection and embedding generation in parallel
+        final File imageFile = File(rawWaypoint.imagePath);
+        final futures = await Future.wait([
+          _clipService.detectPeople(imageFile),
+          _clipService.generatePreprocessedEmbedding(imageFile),
+        ]);
+        
+        final peopleResult = futures[0] as PeopleDetectionResult;
+        final embedding = futures[1] as List<double>;
+        
+        // 🐛 DEBUG: Check people detection result
+        print('🔍 DEBUG waypoint ${i + 1}: peopleDetected=${peopleResult.peopleDetected}, count=${peopleResult.peopleCount}, scores=${peopleResult.confidenceScores}');
+        
+        // Create final waypoint with embedding AND people detection info
+        final waypoint = PathWaypoint(
+          id: rawWaypoint.id,
+          embedding: embedding,
+          heading: rawWaypoint.heading,
+          headingChange: rawWaypoint.headingChange,
+          turnType: rawWaypoint.turnType,
+          isDecisionPoint: rawWaypoint.isDecisionPoint,
+          landmarkDescription: rawWaypoint.landmarkDescription,
+          distanceFromPrevious: rawWaypoint.distanceFromPrevious,
+          timestamp: rawWaypoint.timestamp,
+          sequenceNumber: rawWaypoint.sequenceNumber,
+          // Store people detection info for smart navigation thresholds
+          peopleDetected: peopleResult.peopleDetected,
+          peopleCount: peopleResult.peopleCount,
+          peopleConfidenceScores: peopleResult.confidenceScores,
+        );
+        
+        _waypoints.add(waypoint);
+        
+        // Clean up the raw image file
+        await imageFile.delete();
+        
+        print('Processed waypoint ${i + 1}/${_rawWaypoints.length}: people=${peopleResult.peopleCount}, embedding=${embedding.length}d');
+        
+      } catch (e) {
+        print('Error processing waypoint ${i + 1}: $e');
+        onError?.call('Failed to process waypoint ${i + 1}: $e');
+        
+        // Clean up the raw image file even on error
+        try {
+          await File(rawWaypoint.imagePath).delete();
+        } catch (deleteError) {
+          print('Warning: Could not delete raw image: $deleteError');
+        }
+      }
+    }
+    
+    // Clear raw waypoints after processing
+    _rawWaypoints.clear();
+    
+    print('Batch processing complete. Generated ${_waypoints.length} waypoints with embeddings.');
+  }
+
   Future<void> _processRecordedWaypoints() async {
     if (_waypoints.isEmpty) return;
 
-    print('🔄 Processing ${_waypoints.length} recorded waypoints...');
+    print('Processing ${_waypoints.length} recorded waypoints...');
     
     // Filter out redundant waypoints that are too similar
     List<PathWaypoint> filteredWaypoints = [];
@@ -456,7 +555,7 @@ class ContinuousPathRecorder {
       }
     }
     
-    // Update sequence numbers
+    // Update sequence numbers while preserving ALL data including people detection
     for (int i = 0; i < filteredWaypoints.length; i++) {
       filteredWaypoints[i] = PathWaypoint(
         id: filteredWaypoints[i].id,
@@ -469,14 +568,18 @@ class ContinuousPathRecorder {
         distanceFromPrevious: filteredWaypoints[i].distanceFromPrevious,
         timestamp: filteredWaypoints[i].timestamp,
         sequenceNumber: i,
+        // 🐛 FIX: Preserve people detection data during filtering
+        peopleDetected: filteredWaypoints[i].peopleDetected,
+        peopleCount: filteredWaypoints[i].peopleCount,
+        peopleConfidenceScores: filteredWaypoints[i].peopleConfidenceScores,
       );
     }
     
     _waypoints = filteredWaypoints;
-    print('📊 FILTERING SUMMARY:');
-    print('   📥 Original waypoints: ${_waypoints.length + removedCount}');
-    print('   ❌ Removed duplicates: $removedCount');
-    print('   📤 Final waypoints: ${_waypoints.length}');
+    print('FILTERING SUMMARY:');
+    print('Original waypoints: ${_waypoints.length + removedCount}');
+    print('Removed duplicates: $removedCount');
+    print('Final waypoints: ${_waypoints.length}');
     onStatusUpdate?.call('Filtered to ${_waypoints.length} key waypoints (removed $removedCount duplicates)');
   }
 

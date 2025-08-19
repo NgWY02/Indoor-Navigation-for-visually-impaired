@@ -87,6 +87,14 @@ except ImportError:
     print("⚠️ open-clip-torch not available. Install with: pip install open-clip-torch")
     VITL14_AVAILABLE = False
 
+# Import DINOv2 for superior spatial understanding
+try:
+    from transformers import Dinov2Model, AutoImageProcessor
+    DINOV2_AVAILABLE = True
+except ImportError:
+    print("⚠️ transformers not available. Install with: pip install transformers")
+    DINOV2_AVAILABLE = False
+
 # CLIP client instance (fallback)
 clip_client = None
 
@@ -94,6 +102,10 @@ clip_client = None
 clip_vitl14_model = None
 clip_vitl14_preprocess = None
 clip_vitl14_tokenizer = None
+
+# DINOv2 model instances (best for spatial discrimination)
+dinov2_model = None
+dinov2_processor = None
 
 # Inpainting model singletons
 _sam_mask_generator: Optional[Any] = None
@@ -190,11 +202,11 @@ def initialize_inpaint_models() -> bool:
         # Initialize Stable Diffusion inpainting pipeline
         if StableDiffusionInpaintPipeline is not None:
             try:
-                # Respect override via env, otherwise try safetensors-first models in order
+                # Respect override via env, otherwise prioritize SD 2.0 for better quality
                 preferred = os.environ.get("SD_INPAINT_MODEL")
                 candidate_models = [preferred] if preferred else [
-                    "runwayml/stable-diffusion-inpainting",           # SD 1.5 inpaint (fast) – may use .bin
-                    "stabilityai/stable-diffusion-2-inpainting",      # SD 2 inpaint – safetensors available
+                    "stabilityai/stable-diffusion-2-inpainting",      # SD 2.0 inpaint (better quality) – prioritized
+                    "runwayml/stable-diffusion-inpainting",           # SD 1.5 inpaint (fallback)
                 ]
 
                 last_err = None
@@ -284,7 +296,7 @@ def _dilate_mask_binary(mask: np.ndarray, kernel_size: int = 15) -> np.ndarray:
 
 
 def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
-    """Use YOLOv8 segmentation to detect and segment people in one step."""
+    """Use YOLOv8 segmentation to detect and segment people + their carried objects in one step."""
     if _yolo_model is None:
         return []
     
@@ -292,8 +304,21 @@ def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
         import time
         yolo_start = time.time()
         
+        # COCO classes for people and common carried objects
+        target_classes = {
+            0: 'person',
+            24: 'backpack',
+            25: 'umbrella', 
+            26: 'handbag',
+            28: 'suitcase',
+            67: 'cell phone',  # people often hold phones
+            73: 'laptop',      # people carry laptops
+            76: 'keyboard',    # sometimes carried
+        }
+        
         results = _yolo_model(img, verbose=False)
-        person_masks = []
+        all_masks = []
+        detected_objects = []
         
         for result in results:
             # Check if segmentation masks are available
@@ -302,33 +327,49 @@ def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
                 masks = result.masks
                 
                 for i, box in enumerate(boxes):
-                    # YOLO class 0 is 'person' in COCO dataset
-                    if int(box.cls) == 0 and float(box.conf) > 0.5:  # confidence threshold
-                        # Get the segmentation mask
-                        mask = masks.data[i].cpu().numpy()
-                        # Resize mask to original image size if needed
-                        if mask.shape != img.shape[:2]:
-                            mask_pil = Image.fromarray((mask * 255).astype(np.uint8))
-                            mask_resized = mask_pil.resize((img.shape[1], img.shape[0]))
-                            mask = np.array(mask_resized)
-                        else:
-                            mask = (mask * 255).astype(np.uint8)
+                    class_id = int(box.cls)
+                    confidence = float(box.conf)
+                    
+                    # Include person + carried objects with appropriate confidence thresholds
+                    if class_id in target_classes:
+                        # Use higher confidence for people, lower for objects
+                        min_confidence = 0.5 if class_id == 0 else 0.4
                         
-                        person_masks.append(mask)
+                        if confidence > min_confidence:
+                            # Get the segmentation mask
+                            mask = masks.data[i].cpu().numpy()
+                            # Resize mask to original image size if needed
+                            if mask.shape != img.shape[:2]:
+                                mask_pil = Image.fromarray((mask * 255).astype(np.uint8))
+                                mask_resized = mask_pil.resize((img.shape[1], img.shape[0]))
+                                mask = np.array(mask_resized)
+                            else:
+                                mask = (mask * 255).astype(np.uint8)
+                            
+                            all_masks.append(mask)
+                            detected_objects.append(f"{target_classes[class_id]}({confidence:.2f})")
             else:
                 # Fallback to bounding boxes if segmentation not available
                 boxes = result.boxes
                 if boxes is not None:
                     for box in boxes:
-                        if int(box.cls) == 0 and float(box.conf) > 0.5:
-                            x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0].cpu().numpy()]
-                            mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
-                            mask[y1:y2, x1:x2] = 255
-                            person_masks.append(mask)
+                        class_id = int(box.cls)
+                        confidence = float(box.conf)
+                        
+                        if class_id in target_classes:
+                            min_confidence = 0.5 if class_id == 0 else 0.4
+                            
+                            if confidence > min_confidence:
+                                x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0].cpu().numpy()]
+                                mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
+                                mask[y1:y2, x1:x2] = 255
+                                all_masks.append(mask)
+                                detected_objects.append(f"{target_classes[class_id]}({confidence:.2f})")
         
         yolo_time = time.time() - yolo_start
-        print(f"🎯 YOLOv8-seg detected and segmented {len(person_masks)} people ({yolo_time:.2f}s)")
-        return person_masks
+        objects_str = ", ".join(detected_objects) if detected_objects else "none"
+        print(f"🎯 YOLOv8-seg detected: {objects_str} ({yolo_time:.2f}s)")
+        return all_masks
     except Exception as e:
         print(f"⚠️ YOLO segmentation failed: {e}")
         return []
@@ -426,10 +467,10 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
     global _sd_inpaint_pipeline
     img = _np_image_from_bytes(image_bytes)
     try:
-        # Step 1 & 2 Combined: Use YOLOv8 segmentation to detect and segment people in one step
+        # Step 1 & 2 Combined: Use YOLOv8 segmentation to detect and segment people + objects in one step
         candidate_masks = _get_yolo_person_masks(img)
         if not candidate_masks:
-            print("ℹ️ No people detected by YOLOv8 segmentation")
+            print("ℹ️ No people or carried objects detected by YOLOv8 segmentation")
             return None
         # Union all candidate masks
         union_mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
@@ -463,27 +504,28 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
                 pil_image_roi = pil_image_full.crop((x1, y1, x2, y2))
                 pil_mask_roi = pil_mask_full.crop((x1, y1, x2, y2))
 
-                # AUTO mode: choose size/steps by ROI size
+                # BATCH mode: Higher quality settings since we're not real-time
                 roi_w, roi_h = (x2 - x1), (y2 - y1)
                 if max(roi_w, roi_h) <= 384:
-                    target_size = 384
-                    sd_steps = 6
-                    sd_guidance = 2.8
+                    target_size = 512  # Upscale for better quality
+                    sd_steps = 15      # More steps for better results
+                    sd_guidance = 7.5  # Higher guidance for SD 2.0
                 else:
                     target_size = 512
-                    sd_steps = 8
-                    sd_guidance = 3.0
+                    sd_steps = 20      # Even more steps for larger areas
+                    sd_guidance = 7.5
 
                 # Resize ROI directly (no letterbox) to avoid border lines
                 image_512 = pil_image_roi.resize((target_size, target_size), Image.BICUBIC)
                 # Use NEAREST for mask to keep hard edges; we'll feather later
                 mask_512 = pil_mask_roi.resize((target_size, target_size), Image.NEAREST)
 
-                # Inference (fast settings)
+                # Inference (high quality settings for batch processing)
                 start_time = time.time()
                 with torch.no_grad():
                     result = _sd_inpaint_pipeline(
-                        prompt="empty hallway, clean indoor space",
+                        prompt="clean empty hallway, architectural interior, smooth walls, professional lighting, no people",
+                        negative_prompt="people, persons, humans, crowds, blurry, distorted, artifacts",
                         image=image_512,
                         mask_image=mask_512,
                         num_inference_steps=sd_steps,
@@ -504,8 +546,8 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
                 composed.paste(out_roi, (x1, y1), mask=paste_mask)
 
                 inpainted = np.array(composed)
-                used_pipeline = 'stable_diffusion'
-                print(f"✅ Inpainted using SD1.5 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)}, {target_size}px, steps={sd_steps})")
+                used_pipeline = 'stable_diffusion_2'
+                print(f"✅ Inpainted using SD2.0 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)}, {target_size}px, steps={sd_steps})")
 
             except Exception as e:
                 print(f"⚠️ Stable Diffusion inpainting failed: {e}")
@@ -521,6 +563,32 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
         print(f"⚠️ Inpainting failed, forwarding original image. Reason: {e}")
         return None
 
+def initialize_dinov2_model():
+    """Initialize DINOv2 model for superior spatial discrimination"""
+    global dinov2_model, dinov2_processor
+    
+    if not DINOV2_AVAILABLE:
+        return False
+        
+    try:
+        print(f"🔄 Loading DINOv2-base model on {_device_str}...")
+        
+        # Load DINOv2 base model (384-dim embeddings, excellent spatial understanding)
+        dinov2_model = Dinov2Model.from_pretrained('facebook/dinov2-base')
+        dinov2_processor = AutoImageProcessor.from_pretrained('facebook/dinov2-base')
+        
+        dinov2_model.to(_device_str)
+        dinov2_model.eval()
+        
+        print(f"✅ DINOv2-base model loaded successfully on {_device_str}")
+        print(f"📊 Model parameters: ~86M, 768-dim embeddings (superior spatial discrimination)")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to load DINOv2 model: {e}")
+        return False
+
 def initialize_vitl14_model():
     """Initialize CLIP ViT-L/14 model for better hallway discrimination"""
     global clip_vitl14_model, clip_vitl14_preprocess, clip_vitl14_tokenizer
@@ -529,24 +597,35 @@ def initialize_vitl14_model():
         return False
         
     try:
-        print(f"🔄 Loading CLIP ViT-L/14 model on {_device_str}...")
+        print(f"🔄 Loading CLIP ViT-L/14-336 model on {_device_str}...")
         
-        # Load ViT-L/14 model from OpenAI
-        clip_vitl14_model, _, clip_vitl14_preprocess = open_clip.create_model_and_transforms(
-            'ViT-L-14', 
-            pretrained='openai',
-            device=_device_str
-        )
+        # Try ViT-L/14-336 first, fallback to regular ViT-L/14 if download fails
+        try:
+            clip_vitl14_model, _, clip_vitl14_preprocess = open_clip.create_model_and_transforms(
+                'ViT-L-14-336', 
+                pretrained='openai',
+                device=_device_str
+            )
+            print(f"✅ Successfully loaded ViT-L/14-336 (336px resolution)")
+        except Exception as e:
+            print(f"⚠️ ViT-L/14-336 failed ({e}), falling back to ViT-L/14...")
+            clip_vitl14_model, _, clip_vitl14_preprocess = open_clip.create_model_and_transforms(
+                'ViT-L-14', 
+                pretrained='openai',
+                device=_device_str
+            )
+            print(f"✅ Successfully loaded ViT-L/14 (224px resolution)")
         
+        # Use appropriate tokenizer (both models use same tokenizer)
         clip_vitl14_tokenizer = open_clip.get_tokenizer('ViT-L-14')
         
-        print(f"✅ CLIP ViT-L/14 model loaded successfully on {_device_str}")
-        print(f"📊 Model parameters: ~427M (much better hallway discrimination)")
+        print(f"✅ CLIP ViT-L/14-336 model loaded successfully on {_device_str}")
+        print(f"📊 Model parameters: ~427M, Input resolution: 336px (better hallway discrimination)")
         
         return True
         
     except Exception as e:
-        print(f"❌ Failed to load CLIP ViT-L/14 model: {e}")
+        print(f"❌ Failed to load CLIP ViT-L/14-336 model: {e}")
         return False
 
 def initialize_clip_client():
@@ -560,6 +639,25 @@ def initialize_clip_client():
     except Exception as e:
         print(f"❌ Failed to connect to CLIP server: {e}")
         return False
+
+def encode_with_dinov2(pil_image: Image.Image) -> List[float]:
+    """Encode image using DINOv2 model"""
+    global dinov2_model, dinov2_processor
+    
+    if dinov2_model is None:
+        raise Exception("DINOv2 model not loaded")
+    
+    # Preprocess and encode
+    inputs = dinov2_processor(pil_image, return_tensors="pt").to(_device_str)
+    
+    with torch.no_grad():
+        outputs = dinov2_model(**inputs)
+        # Use CLS token (first token) as global image representation
+        features = outputs.last_hidden_state[:, 0, :]  # Shape: [1, 384]
+        # Normalize features
+        features = features / features.norm(dim=-1, keepdim=True)
+    
+    return features.cpu().numpy().flatten().tolist()
 
 def encode_with_vitl14(pil_image: Image.Image) -> List[float]:
     """Encode image using ViT-L/14 model"""
@@ -596,15 +694,20 @@ def encode_text_with_vitl14(text: str) -> List[float]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application lifespan events"""
-    # Startup - Try ViT-L/14 first, fallback to GRPC client
-    vitl14_success = initialize_vitl14_model()
-    if not vitl14_success:
-        print("⚠️ ViT-L/14 model failed to load, trying GRPC client fallback...")
-        clip_success = initialize_clip_client()
-        if not clip_success:
-            print("⚠️ Both ViT-L/14 and GRPC CLIP server failed. Some endpoints may not work.")
+    # Startup - Try DINOv2 first (best spatial discrimination), then ViT-L/14, then GRPC
+    dinov2_success = initialize_dinov2_model()
+    if dinov2_success:
+        print("✅ Using DINOv2 model for superior spatial discrimination")
     else:
-        print("✅ Using ViT-L/14 model for better hallway discrimination")
+        print("⚠️ DINOv2 model failed to load, trying ViT-L/14...")
+        vitl14_success = initialize_vitl14_model()
+        if not vitl14_success:
+            print("⚠️ ViT-L/14 model failed to load, trying GRPC client fallback...")
+            clip_success = initialize_clip_client()
+            if not clip_success:
+                print("⚠️ All models failed. Some endpoints may not work.")
+        else:
+            print("✅ Using ViT-L/14 model for hallway discrimination")
     
     # Initialize SAM + LaMa (optional)
     try:
@@ -636,22 +739,41 @@ class EmbeddingResponse(BaseModel):
     dimensions: int
 
 
+class PeopleDetectionResponse(BaseModel):
+    people_detected: bool
+    people_count: int
+    confidence_scores: List[float]
+
+
 class InpaintPreviewRequest(BaseModel):
     image: str  # base64-encoded image
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    global clip_vitl14_model, clip_client
+    global dinov2_model, clip_vitl14_model, clip_client
     
-    # Check ViT-L/14 first (preferred)
-    if clip_vitl14_model is not None:
+    # Check DINOv2 first (best)
+    if dinov2_model is not None:
         return {
             "status": "healthy", 
-            "message": "CLIP ViT-L/14 server is ready",
-            "model": "ViT-L/14",
+            "message": "DINOv2 server is ready",
+            "model": "DINOv2-base",
+            "device": _device_str,
+            "parameters": "~86M",
+            "dimensions": 768,
+            "features": ["Superior spatial discrimination", "Stable Diffusion", "YOLO"]
+        }
+    
+    # Check ViT-L/14 (good)
+    elif clip_vitl14_model is not None:
+        return {
+            "status": "healthy", 
+            "message": "CLIP ViT-L/14-336 server is ready",
+            "model": "ViT-L/14-336",
             "device": _device_str,
             "parameters": "~427M",
+            "dimensions": 768,
             "features": ["Stable Diffusion", "YOLO"]
         }
     
@@ -669,8 +791,8 @@ async def health_check():
 
 @app.post("/encode", response_model=EmbeddingResponse)
 async def encode_image(image: UploadFile = File(...)):
-    """Encode an uploaded image using CLIP (ViT-L/14 preferred, fallback to GRPC)"""
-    global clip_vitl14_model, clip_client
+    """Encode an uploaded image using best available model (DINOv2 > ViT-L/14 > GRPC)"""
+    global dinov2_model, clip_vitl14_model, clip_client
     
     try:
         # Read and process image
@@ -681,8 +803,13 @@ async def encode_image(image: UploadFile = File(...)):
         if pil_image.mode != 'RGB':
             pil_image = pil_image.convert('RGB')
         
-        # Try ViT-L/14 first (better hallway discrimination)
-        if clip_vitl14_model is not None:
+        # Try DINOv2 first (best spatial discrimination)
+        if dinov2_model is not None:
+            embedding = encode_with_dinov2(pil_image)
+            return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
+        
+        # Try ViT-L/14 second (good hallway discrimination)
+        elif clip_vitl14_model is not None:
             embedding = encode_with_vitl14(pil_image)
             return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
         
@@ -745,15 +872,15 @@ async def encode_image(image: UploadFile = File(...)):
 
 @app.post("/encode/inpainted", response_model=EmbeddingResponse)
 async def encode_image_inpainted(image: UploadFile = File(...)):
-    """Inpaint likely people using SAM+Stable Diffusion before encoding with CLIP ViT-L/14.
+    """Inpaint likely people using SAM+Stable Diffusion before encoding with best available model.
 
     Falls back to original image if inpainting is unavailable or fails.
     """
-    global clip_vitl14_model, clip_client
+    global dinov2_model, clip_vitl14_model, clip_client
 
-    # Check if any CLIP model is available
-    if clip_vitl14_model is None and clip_client is None:
-        raise HTTPException(status_code=503, detail="No CLIP model available")
+    # Check if any model is available
+    if dinov2_model is None and clip_vitl14_model is None and clip_client is None:
+        raise HTTPException(status_code=503, detail="No embedding model available")
 
     try:
         # Read the image data
@@ -762,8 +889,12 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
         # Try inpainting pipeline
         pil_image = inpaint_people_from_image_bytes(image_data) or Image.open(io.BytesIO(image_data)).convert("RGB")
 
-        # Use ViT-L/14 if available, otherwise fallback to GRPC client
-        if clip_vitl14_model is not None:
+        # Use DINOv2 if available (best)
+        if dinov2_model is not None:
+            embedding = encode_with_dinov2(pil_image)
+            return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
+        # Use ViT-L/14 if available (good)
+        elif clip_vitl14_model is not None:
             embedding = encode_with_vitl14(pil_image)
             return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
         elif clip_client is not None:
@@ -805,7 +936,7 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
 
             return EmbeddingResponse(embedding=embedding, dimensions=len(embedding))
         else:
-            raise HTTPException(status_code=503, detail="No CLIP model available")
+            raise HTTPException(status_code=503, detail="No embedding model available")
     except Exception as e:
         print(f"Error inpaint-encoding image: {e}")
         import traceback
@@ -815,8 +946,62 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
 
 @app.post("/encode/preprocessed", response_model=EmbeddingResponse)
 async def encode_image_preprocessed(image: UploadFile = File(...)):
-    """Alias for clients expecting /encode/preprocessed - uses ViT-L/14 with Stable Diffusion inpainting."""
+    """Encode image with people removal preprocessing (YOLO+Stable Diffusion) before DINOv2 encoding."""
     return await encode_image_inpainted(image)
+
+
+@app.post("/encode/navigation", response_model=EmbeddingResponse)
+async def encode_image_navigation(image: UploadFile = File(...)):
+    """Encode image for navigation - raw DINOv2 without inpainting (fast for real-time)."""
+    return await encode_image(image)
+
+
+@app.post("/detect/people", response_model=PeopleDetectionResponse)
+async def detect_people(image: UploadFile = File(...)):
+    """Detect people in an image using YOLO without full preprocessing.
+    
+    Returns information about detected people including count and confidence scores.
+    """
+    try:
+        image_bytes = await image.read()
+        img = _np_image_from_bytes(image_bytes)
+        
+        # Use YOLO to detect people + carried objects
+        all_masks = _get_yolo_person_masks(img)
+        people_detected = len(all_masks) > 0
+        people_count = len(all_masks)
+        
+        # Get confidence scores from YOLO detection for people and objects
+        confidence_scores = []
+        if _yolo_model is not None:
+            try:
+                # Target classes for detection
+                target_classes = {0, 24, 25, 26, 28, 67, 73, 76}
+                
+                results = _yolo_model(img, verbose=False)
+                for result in results:
+                    if hasattr(result, 'boxes') and result.boxes is not None:
+                        boxes = result.boxes
+                        for box in boxes:
+                            class_id = int(box.cls)
+                            confidence = float(box.conf)
+                            
+                            if class_id in target_classes:
+                                min_confidence = 0.5 if class_id == 0 else 0.4
+                                if confidence > min_confidence:
+                                    confidence_scores.append(confidence)
+            except Exception as e:
+                print(f"⚠️ Error getting confidence scores: {e}")
+        
+        return PeopleDetectionResponse(
+            people_detected=people_detected,
+            people_count=people_count,
+            confidence_scores=confidence_scores
+        )
+        
+    except Exception as e:
+        print(f"Error detecting people: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to detect people: {str(e)}")
 
 
 @app.post("/inpaint/preview")
@@ -911,16 +1096,20 @@ async def root():
             "health": "/health",
             "encode_image": "/encode (POST with image file)",
             "encode_text": "/encode/text (POST with JSON body)",
-            "encode_image_inpainted": "/encode/inpainted (POST with image file; SAM+Stable Diffusion preprocessed)"
+            "encode_image_inpainted": "/encode/inpainted (POST with image file; YOLO+Stable Diffusion preprocessed)",
+            "encode_image_preprocessed": "/encode/preprocessed (POST with image file; YOLO+Stable Diffusion preprocessed - for recording)",
+            "encode_image_navigation": "/encode/navigation (POST with image file; raw DINOv2 - for real-time navigation)",
+            "detect_people": "/detect/people (POST with image file; YOLO people detection only)"
         }
     }
 
 if __name__ == "__main__":
-    print("🚀 Starting CLIP ViT-L/14 HTTP Gateway...")
-    print("🤖 Direct ViT-L/14 model integration (no external server needed)")
+    print("🚀 Starting Advanced Vision Embedding HTTP Gateway...")
+    print("🤖 DINOv2 + ViT-L/14-336 model integration (no external server needed)")
     print("🌐 HTTP API will be available at http://192.168.0.104:8000")
-    print("🎯 Features: ViT-L/14 + Stable Diffusion + YOLO (SAM removed)")
-    print("📊 768-dimensional embeddings for better hallway discrimination")
+    print("🎯 Features: DINOv2 + ViT-L/14-336 + Stable Diffusion + YOLO")
+    print("📊 DINOv2: 768-dim embeddings for superior spatial discrimination")
+    print("📊 ViT-L/14-336: 768-dim embeddings, 336px resolution (fallback)")
     print()
     
     uvicorn.run(

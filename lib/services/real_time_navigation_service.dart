@@ -34,7 +34,7 @@ class RealTimeNavigationService {
   StreamSubscription<PedestrianStatus>? _pedestrianStatusSubscription;
   int _stepsAtLastWaypoint = 0;
   int _currentTotalSteps = 0;
-  DateTime _lastWaypointTime = DateTime.now();
+
   bool _isUserWalking = false;
   // Note: Now uses real step-based distances from path recording
   
@@ -44,10 +44,17 @@ class RealTimeNavigationService {
   DateTime _lastGuidanceTime = DateTime.now();
   
   // Configuration
-  static const double _waypointReachedThreshold = 0.9; //Waypoint threshold
+  static const double _waypointReachedThresholdDefault = 0.85; // Default waypoint threshold
+  static const double _waypointReachedThresholdWithPeople = 0.8; // Lower threshold when people detected
   static const double _offTrackThreshold = 0.4; // Lowered from 0.5 for testing
   static const Duration _guidanceInterval = Duration(seconds: 2);
   static const Duration _repositioningTimeout = Duration(seconds: 10);
+  
+  // Dynamic threshold and audio management
+  double _currentWaypointThreshold = 0.9;
+  bool _peopleDetectedInLastFrame = false;
+  String? _lastSpokenInstruction;
+  DateTime? _lastInstructionTime;
   
   // 🚶 STEP COUNTER CONFIGURATION
   // Note: Now uses real step-based distances from path recording
@@ -92,11 +99,17 @@ class RealTimeNavigationService {
       _currentRoute = route;
       _currentWaypointIndex = 0;
       _currentSequenceNumber = 0;
+      
+      // Reset audio tracking for new navigation session
+      _lastSpokenInstruction = null;
+      _lastInstructionTime = null;
+      _peopleDetectedInLastFrame = false;
+      _currentWaypointThreshold = _waypointReachedThresholdDefault;
+      
       _setState(NavigationState.navigating);
       
       // Initialize step counter for this navigation session
       // DON'T set baseline immediately - wait for first step count reading
-      _lastWaypointTime = DateTime.now();
       print('🚀 Navigation started - Starting at sequence: $_currentSequenceNumber');
       print('⏳ Waiting for first step count reading to set baseline...');
       
@@ -135,9 +148,14 @@ class RealTimeNavigationService {
     _currentWaypointIndex = 0;
     _currentSequenceNumber = 0;  // 🚨 FIX: Reset to 0, not 1!
     
+    // Reset audio tracking and people detection state
+    _lastSpokenInstruction = null;
+    _lastInstructionTime = null;
+    _peopleDetectedInLastFrame = false;
+    _currentWaypointThreshold = _waypointReachedThresholdDefault;
+    
     // 🚶 Reset step counter state
     _stepsAtLastWaypoint = 0;
-    _lastWaypointTime = DateTime.now();
     _isUserWalking = false;
     
     _setState(NavigationState.idle);
@@ -150,6 +168,18 @@ class RealTimeNavigationService {
     if (_state != NavigationState.navigating || _currentRoute == null) return;
 
     try {
+      // First, detect if people are present in the frame
+      final peopleDetection = await _clipService.detectPeople(imageFile);
+      _peopleDetectedInLastFrame = peopleDetection.peopleDetected;
+      
+      // Adjust threshold based on people detection
+      _currentWaypointThreshold = _peopleDetectedInLastFrame 
+          ? _waypointReachedThresholdWithPeople 
+          : _waypointReachedThresholdDefault;
+      
+      print('👥 People detection: ${peopleDetection.peopleDetected} (count: ${peopleDetection.peopleCount})');
+      print('🎯 Using threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} ${_peopleDetectedInLastFrame ? "(people detected)" : "(normal)"}');
+      
       // Generate embedding for current view with people removal preprocessing
       final currentEmbedding = await _clipService.generatePreprocessedEmbedding(imageFile);
       _lastCapturedEmbedding = currentEmbedding;
@@ -165,34 +195,34 @@ class RealTimeNavigationService {
       
       // Calculate similarity with target waypoint
       final similarity = _calculateCosineSimilarity(currentEmbedding, targetWaypoint.embedding);
-      print('📊 Similarity: ${similarity.toStringAsFixed(3)} (threshold: $_waypointReachedThreshold)');
+      print('📊 Similarity: ${similarity.toStringAsFixed(3)} (threshold: ${_currentWaypointThreshold.toStringAsFixed(2)})');
       
       // 🚶 STEP COUNTER SOLUTION: Multi-condition waypoint validation
-      final hasVisualMatch = similarity >= _waypointReachedThreshold;
+      final hasVisualMatch = similarity >= _currentWaypointThreshold;
       // 🚨 TEMPORARILY DISABLED: Step validation for testing
       // final hasSufficientSteps = _hasWalkedSufficientSteps(targetWaypoint);
       final hasSufficientSteps = true; // Always true for testing
-      final hasSufficientTime = _hasWaitedSufficientTime();
       
       print('🔍 Waypoint validation for sequence $_currentSequenceNumber:');
-      print('   👁️ Visual match (≥${_waypointReachedThreshold}): $hasVisualMatch (${similarity.toStringAsFixed(3)})');
+      print('   👁️ Visual match (≥${_currentWaypointThreshold.toStringAsFixed(2)}): $hasVisualMatch (${similarity.toStringAsFixed(3)})');
       print('   🚶 Sufficient steps: $hasSufficientSteps');
-      print('   ⏱️ Sufficient time: $hasSufficientTime');
       print('   🎯 Target: ${targetWaypoint.landmarkDescription ?? 'No description'}, Turn: ${targetWaypoint.turnType}');
       print('   📍 Target sequence: ${targetWaypoint.sequenceNumber}');
       
-      // 🐛 Send navigation validation info to screen
+      // Send navigation validation info to screen
       final validationInfo = '''
-🔍 VALIDATION (Seq $_currentSequenceNumber):
-👁️ Visual: ${similarity.toStringAsFixed(3)} (need ≥$_waypointReachedThreshold)
-${hasVisualMatch ? "✅" : "❌"} Visual Match
-✅ Steps DISABLED (testing mode)
-${hasSufficientTime ? "✅" : "❌"} Time OK
-🎯 ${targetWaypoint.landmarkDescription ?? 'No landmark'}''';
-      _updateDebugDisplay(validationInfo);
+        🔍 VALIDATION (Seq $_currentSequenceNumber):
+        👥 People: ${_peopleDetectedInLastFrame ? "YES" : "NO"} (${peopleDetection.peopleCount})
+        👁️ Visual: ${similarity.toStringAsFixed(3)} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})
+        ${hasVisualMatch ? "✅" : "❌"} Visual Match
+        ✅ Steps DISABLED (testing mode)
+        🎯 ${targetWaypoint.landmarkDescription ?? 'No landmark'}
+      ''';
+
+       _updateDebugDisplay(validationInfo);
       
-      // Check if user has reached the waypoint (ALL conditions must be met)
-      if (hasVisualMatch && hasSufficientSteps && hasSufficientTime) {
+      // Check if user has reached the waypoint (visual match only)
+      if (hasVisualMatch && hasSufficientSteps) {
         print('✅ All conditions met - Waypoint reached!');
         await _waypointReached();
       } else if (similarity < _offTrackThreshold) {
@@ -201,10 +231,9 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
       } else {
         // Provide guidance toward the target
         print('⏳ Conditions not met:');
-        if (!hasVisualMatch) print('   ❌ Visual similarity too low: ${similarity.toStringAsFixed(3)} (need ≥${_waypointReachedThreshold})');
+        if (!hasVisualMatch) print('   ❌ Visual similarity too low: ${similarity.toStringAsFixed(3)} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})');
         // 🚨 DISABLED: Step validation
         // if (!hasSufficientSteps) print('   ❌ Not enough steps walked');
-        if (!hasSufficientTime) print('   ❌ Not enough time elapsed');
         
         // 🚨 DISABLED: Step-based guidance
         // if (hasVisualMatch && !hasSufficientSteps) {
@@ -260,7 +289,7 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
     return buffer.toString();
   }
 
-  /// 🐛 Update debug display
+  /// Update debug display
   void _updateDebugDisplay(String additionalInfo) {
     if (onDebugUpdate == null) return;
     
@@ -293,11 +322,11 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
     // Get current waypoint by sequence number (not array index!)
     final targetWaypoint = _getWaypointBySequence(_currentSequenceNumber);
     if (targetWaypoint == null) {
-      print('❌ No waypoint found for sequence $_currentSequenceNumber');
+      print('No waypoint found for sequence $_currentSequenceNumber');
       return;
     }
 
-    print('🎯 Current target: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
+    print('Current target: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
     
     // Periodically remind user of current instruction if no recent progress
     final timeSinceLastGuidance = DateTime.now().difference(_lastGuidanceTime);
@@ -331,16 +360,7 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
 
   // � REMOVED: _hasWalkedSufficientSteps() - using visual-only navigation mode
 
-  /// 🚶 Check if enough time has passed for realistic movement
-  bool _hasWaitedSufficientTime() {
-    final timeSinceLastWaypoint = DateTime.now().difference(_lastWaypointTime);
-    
-    // Capture waypoint every 2 seconds during navigation
-    final minimumTime = Duration(seconds: 2); 
-    
-    print('Time validation: ${timeSinceLastWaypoint.inSeconds}s (minimum: ${minimumTime.inSeconds}s)');
-    return timeSinceLastWaypoint >= minimumTime;
-  }
+
 
   Future<void> _waypointReached() async {
     _setState(NavigationState.approachingWaypoint);
@@ -360,7 +380,6 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
     
     // 🚨 DISABLED: Step counter reset
     // _stepsAtLastWaypoint = _currentTotalSteps;
-    _lastWaypointTime = DateTime.now();
     // print('🔄 Step counter reset: Steps at waypoint = $_stepsAtLastWaypoint');
     print('🔄 Waypoint progression (visual-only mode)');
     
@@ -397,7 +416,7 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
     onStatusUpdate?.call('Off track');
     
     // Automatically return to navigation after a moment
-    Timer(Duration(seconds: 5), () {
+    Timer(Duration(seconds: 1), () {
       if (_state == NavigationState.offTrack) {
         _setState(NavigationState.navigating);
       }
@@ -417,8 +436,8 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
     final instruction = await _createNavigationInstruction(targetWaypoint, similarity);
     onInstructionUpdate?.call(instruction);
     
-    // Speak the instruction
-    await _speak(instruction.spokenInstruction);
+    // Speak the instruction using smart speaking to prevent repetition
+    await _speakSmart(instruction.spokenInstruction);
     
     // Update status
     onStatusUpdate?.call(instruction.displayText);
@@ -475,17 +494,17 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
   Future<void> _updateNavigationInstruction() async {
     if (_currentRoute == null) return;
     
-    // 🚨 FIX: Get waypoint by SEQUENCE NUMBER, not array index!
+    // Get waypoint by sequence number, not array index
     final targetWaypoint = _getWaypointBySequence(_currentSequenceNumber);
     if (targetWaypoint == null) {
-      print('❌ No waypoint found for sequence $_currentSequenceNumber');
+      print('No waypoint found for sequence $_currentSequenceNumber');
       return;
     }
     
     final instruction = await _createNavigationInstruction(targetWaypoint, 0.5);
     
     onInstructionUpdate?.call(instruction);
-    await _speak(instruction.spokenInstruction);
+    await _speakSmart(instruction.spokenInstruction);
   }
 
   Future<void> _speak(String text) async {
@@ -494,6 +513,29 @@ ${hasSufficientTime ? "✅" : "❌"} Time OK
     } catch (e) {
       print('Error speaking: $e');
     }
+  }
+
+  /// Smart speak method that prevents repeated instructions for VIP convenience
+  Future<void> _speakSmart(String text) async {
+    final now = DateTime.now();
+    
+    // Check if this is the same instruction as last time
+    if (_lastSpokenInstruction == text && _lastInstructionTime != null) {
+      final timeSinceLastInstruction = now.difference(_lastInstructionTime!);
+      
+      // Only repeat the instruction if enough time has passed (5 seconds)
+      // This prevents confusion when the app gives "turn right" multiple times
+      if (timeSinceLastInstruction < Duration(seconds: 5)) {
+        print('🔇 Skipping repeated instruction: "$text" (last spoken ${timeSinceLastInstruction.inSeconds}s ago)');
+        return;
+      }
+    }
+    
+    // Speak the instruction and update tracking
+    print('🔊 Speaking: "$text"');
+    _lastSpokenInstruction = text;
+    _lastInstructionTime = now;
+    await _speak(text);
   }
 
   double _calculateCosineSimilarity(List<double> vec1, List<double> vec2) {

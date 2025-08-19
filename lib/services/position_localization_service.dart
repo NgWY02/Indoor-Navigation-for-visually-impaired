@@ -26,7 +26,7 @@ class PositionLocalizationService {
   final SupabaseService _supabaseService;
   
   // Configuration
-  static const double _minimumConfidenceThreshold = 0.9;
+  static const double _minimumConfidenceThreshold = 0.6;
   static const int _maxSamplesForLocalization = 5;
   static const Duration _samplingInterval = Duration(seconds: 2);
   

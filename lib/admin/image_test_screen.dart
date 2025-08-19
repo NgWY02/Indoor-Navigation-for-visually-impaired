@@ -21,8 +21,8 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
   final ImagePicker _picker = ImagePicker();
   
   // Server configuration - use network IP for mobile access
-  static const String _serverHost = '192.168.0.103'; // Your PC's IP address
-  static const int _serverPort = 8000; // SAM + LaMa GPU server
+  static const String _serverHost = '192.168.0.100'; // Your PC's IP address
+  static const int _serverPort = 8000; 
 
   @override
   Widget build(BuildContext context) {
@@ -306,13 +306,13 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
         _statusMessage = 'Sending image to server... (${imageBytes.length} bytes)';
       });
 
-      print('Sending request to: http://$_serverHost:$_serverPort/process_frame');
+      print('Sending request to: http://$_serverHost:$_serverPort/inpaint/preview');
       print('Image size: ${imageBytes.length} bytes');
       print('Base64 size: ${base64Image.length} characters');
 
       // Send to processing server
       final response = await http.post(
-        Uri.parse('http://$_serverHost:$_serverPort/process_frame'),
+        Uri.parse('http://$_serverHost:$_serverPort/inpaint/preview'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -343,13 +343,8 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
         
         setState(() {
           _processedImageBytes = processedImageBytes;
-          _processingStats = {
-            'crowd_density': data['crowd_density'] ?? 0.0,
-            'processing_mode': data['processing_mode'] ?? 'unknown',
-            'processing_time': data['processing_time'] ?? 0.0,
-            'average_fps': data['average_fps'] ?? 0.0,
-          };
-          _statusMessage = 'Processing completed successfully! Processed ${processedImageBytes.length} bytes';
+          _processingStats = null;
+          _statusMessage = 'Processing completed successfully!';
           _isProcessing = false;
         });
       } else {

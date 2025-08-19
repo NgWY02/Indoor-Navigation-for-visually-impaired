@@ -128,6 +128,256 @@ class SupabaseService {
     return await getUserRole() == UserRole.admin;
   }
 
+  // ============= Groups & Join Codes =============
+  // Minimal phone-friendly APIs for "party" sharing
+
+  // Create a group (party)
+  Future<String> createGroup({required String name}) async {
+    final userId = currentUser?.id;
+    if (userId == null) throw Exception('User not authenticated');
+
+    final response = await client.from('groups').insert({
+      'name': name,
+      'created_by': userId,
+    }).select('id').single();
+
+    return response['id'] as String;
+  }
+
+  // Deprecated: join code endpoints removed (we use user_roles.invite_code)
+
+  // Share a path to one or more groups
+  Future<void> sharePathToGroups({
+    required String pathId,
+    required List<String> groupIds,
+    bool isPublished = true,
+  }) async {
+    final userId = currentUser?.id;
+    if (userId == null) throw Exception('User not authenticated');
+
+    // Mark published
+    await client
+        .from('navigation_paths')
+        .update({'is_published': isPublished})
+        .eq('id', pathId);
+
+    if (groupIds.isNotEmpty) {
+      final rows = groupIds
+          .map((gid) => {
+                'path_id': pathId,
+                'group_id': gid,
+              })
+          .toList();
+      await client.from('path_groups').upsert(rows);
+    }
+  }
+
+  // Load published paths for the user's groups on a map and start node
+  Future<List<NavigationPath>> loadGroupPathsForStart({
+    required String mapId,
+    required String startNodeId,
+  }) async {
+    final userId = currentUser?.id;
+    if (userId == null) throw Exception('User not authenticated');
+
+    // 1) fetch group_ids for this user
+    final memberships = await client
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', userId);
+
+    final groupIds = (memberships as List)
+        .map((e) => e['group_id'] as String)
+        .toList();
+    if (groupIds.isEmpty) return [];
+
+    // 2) fetch path_ids shared with any of these groups
+    final shared = await client
+        .from('path_groups')
+        .select('path_id')
+        .filter('group_id', 'in', '(${groupIds.map((e) => '"$e"').join(',')})');
+
+    final pathIds = (shared as List).map((e) => e['path_id'] as String).toList();
+    if (pathIds.isEmpty) return [];
+
+    // 3) fetch published paths filtered by map/start node and IDs
+    final pathsResponse = await client
+        .from('navigation_paths')
+        .select()
+        .eq('is_published', true)
+        .eq('start_location_id', startNodeId)
+        .eq('map_id', mapId)
+        .filter('id', 'in', '(${pathIds.map((e) => '"$e"').join(',')})')
+        .order('created_at', ascending: false);
+
+    final List<NavigationPath> paths = [];
+    for (final pathData in pathsResponse as List<dynamic>) {
+      final pathId = pathData['id'];
+      final waypointsResponse = await client
+          .from('path_waypoints')
+          .select()
+          .eq('path_id', pathId)
+          .order('sequence_number');
+
+      final waypoints = (waypointsResponse as List<dynamic>).map((wp) {
+        List<double> embedding = [];
+        final embeddingData = wp['embedding'];
+        if (embeddingData != null) {
+          if (embeddingData is String) {
+            try {
+              final clean = embeddingData.replaceAll('[', '').replaceAll(']', '');
+              if (clean.isNotEmpty) {
+                embedding = clean.split(',').map((e) => double.parse(e.trim())).toList();
+              }
+            } catch (_) {}
+          } else if (embeddingData is List) {
+            embedding = List<double>.from(embeddingData);
+          }
+        }
+        return PathWaypoint(
+          id: wp['id'],
+          sequenceNumber: wp['sequence_number'],
+          embedding: embedding,
+          heading: wp['heading'].toDouble(),
+          headingChange: wp['heading_change'].toDouble(),
+          turnType: TurnType.values.firstWhere(
+            (e) => e.name == wp['turn_type'],
+            orElse: () => TurnType.straight,
+          ),
+          isDecisionPoint: wp['is_decision_point'],
+          landmarkDescription: wp['landmark_description'],
+          distanceFromPrevious: wp['distance_from_previous']?.toDouble(),
+          timestamp: DateTime.parse(wp['timestamp']),
+        );
+      }).toList();
+
+      paths.add(NavigationPath(
+        id: pathData['id'],
+        name: pathData['name'],
+        startLocationId: pathData['start_location_id'],
+        endLocationId: pathData['end_location_id'],
+        waypoints: waypoints,
+        estimatedDistance: pathData['estimated_distance']?.toDouble(),
+        estimatedSteps: pathData['estimated_steps'],
+        createdAt: DateTime.parse(pathData['created_at']),
+        updatedAt: DateTime.parse(pathData['updated_at']),
+      ));
+    }
+    return paths;
+  }
+
+  String _generateShortCode(int length) {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no confusing chars
+    final rnd = Random.secure();
+    return List.generate(length, (_) => chars[rnd.nextInt(chars.length)]).join();
+  }
+
+  // ===== User invite code on user_roles (Admin direct invite) =====
+  // Ensure each user has a short invite_code in user_roles (id by user_id)
+  Future<void> ensureInviteCode({int length = 6}) async {
+    final userId = currentUser?.id;
+    if (userId == null) throw Exception('User not authenticated');
+
+    final existing = await client
+        .from('user_roles')
+        .select('invite_code')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+    if (existing == null || existing['invite_code'] == null || (existing['invite_code'] as String).isEmpty) {
+      // Attempt a couple of times to avoid rare collisions
+      for (int i = 0; i < 3; i++) {
+        final code = _generateShortCode(length);
+        try {
+          await client
+              .from('user_roles')
+              .update({'invite_code': code})
+              .eq('user_id', userId);
+          break;
+        } catch (_) {
+          // try another code
+        }
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> findUserByInviteCode(String code) async {
+    final rows = await client
+        .from('user_roles')
+        .select('user_id, name, invite_code')
+        .eq('invite_code', code)
+        .limit(1);
+    if ((rows as List).isEmpty) return null;
+    return rows.first;
+  }
+
+  // Admin adds user to group by their invite_code (no join code required)
+  Future<void> addUserToGroupByCode({required String groupId, required String userCode}) async {
+    final user = await findUserByInviteCode(userCode.toUpperCase());
+    if (user == null) throw Exception('User code not found');
+    final userId = user['user_id'] as String;
+
+    await client.from('group_members').upsert({
+      'group_id': groupId,
+      'user_id': userId,
+      'role': 'member',
+    });
+  }
+
+  // ===== Admin group listing and membership management =====
+  Future<List<Map<String, dynamic>>> getGroupsICreated() async {
+    final userId = currentUser?.id;
+    if (userId == null) throw Exception('User not authenticated');
+
+    final rows = await client
+        .from('groups')
+        .select('id, name, created_at')
+        .eq('created_by', userId)
+        .order('created_at', ascending: false);
+
+    return List<Map<String, dynamic>>.from(rows as List);
+  }
+
+  Future<List<Map<String, dynamic>>> getGroupMembersWithProfiles(String groupId) async {
+    // 1) memberships
+    final memberRows = await client
+        .from('group_members')
+        .select('user_id, role, joined_at')
+        .eq('group_id', groupId);
+
+    final members = List<Map<String, dynamic>>.from(memberRows as List);
+    if (members.isEmpty) return [];
+
+    // 2) enrich from user_roles (name, invite_code)
+    final userIds = members.map((m) => m['user_id'] as String).toList();
+    final rolesRows = await client
+        .from('user_roles')
+        .select('user_id, name, invite_code')
+        .inFilter('user_id', userIds);
+
+    final rolesMap = {for (var r in (rolesRows as List)) r['user_id'] as String: r as Map<String, dynamic>};
+
+    // 3) merge
+    return members.map((m) {
+      final uid = m['user_id'] as String;
+      final r = rolesMap[uid];
+      return {
+        'user_id': uid,
+        'role': m['role'],
+        'joined_at': m['joined_at'],
+        'name': r?['name'],
+        'user_code': r?['invite_code'],
+      };
+    }).toList();
+  }
+
+  Future<void> removeMemberFromGroup({required String groupId, required String userId}) async {
+    await client
+        .from('group_members')
+        .delete()
+        .match({'group_id': groupId, 'user_id': userId});
+  }
+
   // Authentication Methods
   Future<AuthResponse> signUp({
     required String email,
@@ -171,6 +421,8 @@ class SupabaseService {
           'id': newRoleId,
           'user_id': response.user!.id,
           'role': userRoleString,
+          'name': data['name'],
+          'invite_code': _generateShortCode(6),
           'created_at': currentTime,
         });
         print('User role inserted into user_roles table for ${response.user!.id}');
@@ -181,6 +433,44 @@ class SupabaseService {
           print('Postgrest Error Hint: ${e.hint}');
           print('Postgrest Error Code: ${e.code}');
         }
+      }
+
+      // Fallback: ensure name and invite_code are populated even if insert omitted them
+      try {
+        final String uid = response.user!.id;
+        final roleRow = await client
+            .from('user_roles')
+            .select('name, invite_code')
+            .eq('user_id', uid)
+            .single();
+
+        // Set name if missing and provided
+        final providedName = (data['name'] as String?)?.trim();
+        if ((roleRow['name'] == null || (roleRow['name'] as String).isEmpty) &&
+            providedName != null && providedName.isNotEmpty) {
+          await client
+              .from('user_roles')
+              .update({'name': providedName})
+              .eq('user_id', uid);
+        }
+
+        // Set invite_code if missing
+        if (roleRow['invite_code'] == null || (roleRow['invite_code'] as String).isEmpty) {
+          for (int i = 0; i < 3; i++) {
+            final code = _generateShortCode(6);
+            try {
+              await client
+                  .from('user_roles')
+                  .update({'invite_code': code})
+                  .eq('user_id', uid);
+              break;
+            } catch (_) {
+              // try another code on unique violation
+            }
+          }
+        }
+      } catch (e) {
+        print('Post-signup ensure (name/invite_code) failed: $e');
       }
     } else {
         print('Signup response did not contain a user object. Skipping user_roles insert.'); // Log if user is null
@@ -1041,23 +1331,36 @@ class SupabaseService {
       
       // Then, save all waypoints separately
       if (navigationPath.waypoints.isNotEmpty) {
-        final List<Map<String, dynamic>> waypointsData = navigationPath.waypoints.map((waypoint) => {
-          'id': waypoint.id,
-          'path_id': navigationPath.id, // Link to the parent path
-          'sequence_number': waypoint.sequenceNumber,
-          'embedding': waypoint.embedding,
-          'heading': waypoint.heading,
-          'heading_change': waypoint.headingChange,
-          'turn_type': waypoint.turnType.name,
-          'is_decision_point': waypoint.isDecisionPoint,
-          'landmark_description': waypoint.landmarkDescription,
-          'distance_from_previous': waypoint.distanceFromPrevious,
-          'timestamp': waypoint.timestamp.toIso8601String(),
+        final List<Map<String, dynamic>> waypointsData = navigationPath.waypoints.map((waypoint) {
+          // 🐛 DEBUG: Check waypoint people data before saving
+          print('🔍 DEBUG saving waypoint ${waypoint.sequenceNumber}: peopleDetected=${waypoint.peopleDetected}, count=${waypoint.peopleCount}');
+          
+          return {
+            'id': waypoint.id,
+            'path_id': navigationPath.id, // Link to the parent path
+            'sequence_number': waypoint.sequenceNumber,
+            'embedding': waypoint.embedding,
+            'heading': waypoint.heading,
+            'heading_change': waypoint.headingChange,
+            'turn_type': waypoint.turnType.name,
+            'is_decision_point': waypoint.isDecisionPoint,
+            'landmark_description': waypoint.landmarkDescription,
+            'distance_from_previous': waypoint.distanceFromPrevious,
+            'timestamp': waypoint.timestamp.toIso8601String(),
+            // Add people detection fields for smart navigation thresholds
+            'people_detected': waypoint.peopleDetected,
+            'people_count': waypoint.peopleCount,
+            'people_confidence_scores': waypoint.peopleConfidenceScores,
+          };
         }).toList();
         
         // Insert all waypoints
         await client.from('path_waypoints').insert(waypointsData);
         print('${navigationPath.waypoints.length} waypoints saved for path ${navigationPath.id}');
+        
+        // Debug: Show people detection data being saved
+        final peopleWaypoints = navigationPath.waypoints.where((w) => w.peopleDetected).length;
+        print('📊 People detection: ${peopleWaypoints}/${navigationPath.waypoints.length} waypoints had people');
       }
       
       return navigationPath.id;
@@ -1214,6 +1517,12 @@ class SupabaseService {
             landmarkDescription: waypointData['landmark_description'],
             distanceFromPrevious: waypointData['distance_from_previous']?.toDouble(),
             timestamp: DateTime.parse(waypointData['timestamp']),
+            // Load people detection fields for smart navigation thresholds
+            peopleDetected: waypointData['people_detected'] ?? false,
+            peopleCount: waypointData['people_count'] ?? 0,
+            peopleConfidenceScores: waypointData['people_confidence_scores'] != null 
+                ? List<double>.from(waypointData['people_confidence_scores']) 
+                : [],
           );
         }).toList();
         
