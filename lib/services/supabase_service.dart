@@ -568,10 +568,17 @@ class SupabaseService {
   }
 
   Future<void> resetPassword(String email) async {
-    await client.auth.resetPasswordForEmail(
-      email,
-      redirectTo: 'io.supabase.flutterquickstart://login/',
-    );
+    try {
+      // Send password reset email with custom redirect URL to our HTML page
+      // This will work for both development and production
+      await client.auth.resetPasswordForEmail(
+        email,
+        redirectTo: 'http://localhost:3000/reset-password.html',
+      );
+    } catch (e) {
+      print('Reset password error: $e');
+      throw Exception('Failed to send reset email. Please try again.');
+    }
   }
   
   // Admin specific methods

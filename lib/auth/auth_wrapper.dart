@@ -23,22 +23,18 @@ class _AuthWrapperState extends State<AuthWrapper> {
     return StreamBuilder<AuthState>(
       stream: _supabaseService.authStateChanges,
       builder: (context, snapshot) {
-        // If we have a user, route based on their role
         if (_supabaseService.isAuthenticated) {
           return FutureBuilder<bool>(
             future: _supabaseService.isAdmin(),
             builder: (context, adminSnapshot) {
               if (adminSnapshot.connectionState == ConnectionState.waiting) {
-                // Show loading screen while checking user role
                 return const Scaffold(
                   body: Center(
                     child: CircularProgressIndicator(),
                   ),
                 );
               }
-              
               if (adminSnapshot.hasError) {
-                // On error, default to user navigation
                 return UserNavigationScreen(cameras: widget.cameras);
               }
               

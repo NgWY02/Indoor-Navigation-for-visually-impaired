@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import '../services/supabase_service.dart';
-import 'node_capture.dart'; // Import NodeCapture screen
-import 'map_service.dart'; // Import MapService for image loading
-import '../screens/admin/path_recording_screen.dart';
+import '../../services/supabase_service.dart';
+import 'node_capture.dart'; 
+import '../../services/map_service.dart'; 
+import 'path_recording_screen.dart';
 import 'dart:ui' as ui;
 import 'dart:math';
 

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../user/navigation_main_screen.dart';
-import '../../admin/map_management.dart';
+import 'map_management.dart';
 import '../common/profile_screen.dart';
 import 'package:camera/camera.dart';
 

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
@@ -7,20 +8,25 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/admin/admin_home_screen.dart';
 import 'screens/common/profile_screen.dart';
 import 'services/supabase_service.dart';
-import 'admin/admin_panel.dart';
-import 'admin/image_test_screen.dart';
+import 'screens/admin/admin_panel.dart';
+import 'screens/admin/image_test_screen.dart';
 import 'auth/auth_wrapper.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load();
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.portraitDown,
-  ]);
-  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  
+  // Only set orientation on mobile platforms
+  if (!kIsWeb) {
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  }
 
-  if (Platform.isAndroid) {
+  // Only request permissions on Android (not web)
+  if (!kIsWeb && Platform.isAndroid) {
     await [
       Permission.camera,
       Permission.location,
@@ -30,7 +36,8 @@ Future<void> main() async {
   final supabaseService = SupabaseService();
   await supabaseService.initialize();
 
-  final cameras = await availableCameras();
+  // Get cameras (empty list on web since camera access is different)
+  final cameras = kIsWeb ? <CameraDescription>[] : await availableCameras();
 
   runApp(MyApp(cameras: cameras));
 }

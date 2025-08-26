@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
-import '../../admin/map_management.dart';
+import '../screens/../admin/map_management.dart';
 import '../admin/group_management_screen.dart';
 
 

@@ -1,7 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import '../services/supabase_service.dart';
+import '../../services/supabase_service.dart';
 import 'node_capture.dart';
 import 'map_details_screen.dart'; 
 

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/path_models.dart';
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.100:8000'; // HTTP Gateway for Dinov2 server
+  static const String _defaultServerUrl = 'http://192.168.0.103:8000'; 
   final String serverUrl;
   
   ClipService({this.serverUrl = _defaultServerUrl});
@@ -94,7 +94,7 @@ class ClipService {
         recordingPeopleCount: targetWaypoint.peopleCount,
       );
       
-      debugPrint('🎯 Fixed threshold for waypoint: ${threshold.toStringAsFixed(2)} (recording had ${targetWaypoint.peopleCount} people)');
+      debugPrint('Fixed threshold for waypoint: ${threshold.toStringAsFixed(2)} (recording had ${targetWaypoint.peopleCount} people)');
       
       return NavigationEmbeddingResult(
         embedding: embedding,
@@ -127,11 +127,11 @@ class ClipService {
       double baseThreshold = 0.75;
       double reduction = (recordingPeopleCount * 0.02).clamp(0.0, 0.10); // Max 10% reduction
       double finalThreshold = (baseThreshold - reduction).clamp(0.60, 0.80);
-      debugPrint('🎯 Clean-to-raw threshold: ${finalThreshold.toStringAsFixed(2)} (reduced by ${reduction.toStringAsFixed(2)} for ${recordingPeopleCount} people)');
+      debugPrint('Clean-to-raw threshold: ${finalThreshold.toStringAsFixed(2)} (reduced by ${reduction.toStringAsFixed(2)} for ${recordingPeopleCount} people)');
       return finalThreshold;
     } else {
       // Recording had no people (clean) → Navigation also clean → High threshold
-      debugPrint('✅ Clean-to-clean threshold: 0.85');
+      debugPrint('Clean-to-clean threshold: 0.85');
       return 0.85;
     }
   }
@@ -153,13 +153,13 @@ class ClipService {
       // Further reduce based on how many people were in recording
       double reduction = (recordingPeopleCount * 0.02).clamp(0.0, 0.10);
       double finalThreshold = baseThreshold - reduction;
-      debugPrint('🎯 Clean-to-raw case: threshold=${finalThreshold.toStringAsFixed(2)} (reduced by ${reduction.toStringAsFixed(2)})');
+      debugPrint('Clean-to-raw case: threshold=${finalThreshold.toStringAsFixed(2)} (reduced by ${reduction.toStringAsFixed(2)})');
       return finalThreshold.clamp(0.60, 0.80);
     }
     
     // Case 2: Recording had no people, navigation has no people (ideal case)
     else if (!recordingHadPeople && navigationPeopleCount == 0) {
-      debugPrint('✅ Clean-to-clean case: threshold=0.85');
+      debugPrint('Clean-to-clean case: threshold=0.85');
       return 0.85; // High confidence for clean comparisons
     }
     
@@ -170,14 +170,14 @@ class ClipService {
           ? navigationConfidenceScores.reduce((a, b) => a + b) / navigationConfidenceScores.length 
           : 0.5;
       double threshold = 0.78 - (avgConfidence * 0.03);
-      debugPrint('🤝 People-to-people case: threshold=${threshold.toStringAsFixed(2)}');
+      debugPrint('People-to-people case: threshold=${threshold.toStringAsFixed(2)}');
       return threshold.clamp(0.65, 0.80);
     }
     
     // Case 4: Recording had no people, navigation has people (rare but possible)
     else {
       // Clean recording, people in navigation - need lower threshold
-      debugPrint('🔄 Clean-to-people case: threshold=0.72');
+      debugPrint('Clean-to-people case: threshold=0.72');
       return 0.72;
     }
   }
@@ -228,8 +228,8 @@ class ClipService {
           confidenceScores: List<double>.from(responseData['confidence_scores'] ?? []),
         );
         
-        // 🐛 DEBUG: Check server response
-        debugPrint('🔍 DEBUG ClipService.detectPeople: ${result.toString()}');
+        // DEBUG: Check server response
+        debugPrint('DEBUG ClipService.detectPeople: ${result.toString()}');
         return result;
       } else {
         throw Exception('CLIP server error: ${response.statusCode} - ${response.body}');

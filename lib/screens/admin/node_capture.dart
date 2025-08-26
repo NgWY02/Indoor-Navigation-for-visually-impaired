@@ -4,19 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../services/supabase_service.dart';
-import 'map_service.dart';
-import 'video_processor_service.dart';
-import 'node_capture_widgets.dart';
+import '../../services/supabase_service.dart';
+import '../../services/map_service.dart';
+import '../../services/video_processor_service.dart';
+import '../../widgets/node_capture_widgets.dart';
 
 class NodeCapture extends StatefulWidget {
   final String mapId;
-  final String? nodeId; // Add optional nodeId parameter for editing
+  final String? nodeId; 
 
   const NodeCapture({
     Key? key, 
     required this.mapId,
-    this.nodeId, // Optional - if provided, we're in edit mode
+    this.nodeId, 
   }) : super(key: key);
 
   @override
@@ -36,7 +36,6 @@ class _NodeCaptureState extends State<NodeCapture> {
   Offset? _selectedPosition;
   double _imageScale = 1.0;
   Offset _imageOffset = Offset.zero;
-  bool _readyForCameraView = false;
   bool _isProcessingVideo = false;
   double _processingProgress = 0.0;
   String _processingMessage = '';
@@ -47,7 +46,6 @@ class _NodeCaptureState extends State<NodeCapture> {
   // New state variables for edit mode
   bool _isEditMode = false;
   bool _isLoadingNodeData = false;
-  Map<String, dynamic>? _existingNodeData;
   
   // New state variable for direction
   double? _capturedDirection;
@@ -128,8 +126,6 @@ class _NodeCaptureState extends State<NodeCapture> {
       
       if (mounted) {
         setState(() {
-          _existingNodeData = nodeData;
-          
           // Set node name in text controller
           _nodeNameController.text = nodeData['name'] ?? '';
           
@@ -140,9 +136,6 @@ class _NodeCaptureState extends State<NodeCapture> {
           
           // Set reference direction if available
           _capturedDirection = (nodeData['reference_direction'] as num?)?.toDouble();
-          
-          // In edit mode, we're ready to record right away if needed
-          _readyForCameraView = true;
           
           _isLoadingNodeData = false;
         });
@@ -205,7 +198,6 @@ class _NodeCaptureState extends State<NodeCapture> {
       if (pickedFile != null) {
         setState(() {
           _videoFile = pickedFile;
-          _readyForCameraView = false; // Ready for preview/process
         });
         await _initializeVideoPlayer(); // Initialize preview
       } else {

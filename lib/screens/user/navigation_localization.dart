@@ -9,8 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'services/supabase_service.dart';
-import 'services/clip_service.dart';
+import '../../services/supabase_service.dart';
+import '../../services/clip_service.dart';
 import 'package:flutter/foundation.dart'; 
 
 // Utility function for reshaping lists (from navigation_screen)
@@ -498,13 +498,10 @@ class _NavigationLocalizationScreenState
   void _updateScanGuidanceText() {
     String newGuidance =
         ""; // Initialize to prevent uninitialized access if conditions not met
-    IconData newIcon = Icons.explore;
     bool shouldSpeakGuidance = false;
 
     if (!_isScanning360 || _currentHeading == null) {
       newGuidance = _isScanning360 ? "Waiting for compass..." : "Ready";
-      newIcon =
-          _isScanning360 ? Icons.hourglass_empty : Icons.play_circle_outline;
       // Don't speak "Waiting for compass" too often, only if state changes to this.
       if (newGuidance != _scanGuidance) {
         shouldSpeakGuidance =
@@ -524,7 +521,6 @@ class _NavigationLocalizationScreenState
 
     if (_allDirectionsScanned360()) {
       newGuidance = "All directions scanned. Processing...";
-      newIcon = Icons.celebration;
       if (newGuidance != _scanGuidance) shouldSpeakGuidance = true;
       setState(() {
         _scanGuidance = newGuidance;
@@ -544,7 +540,6 @@ class _NavigationLocalizationScreenState
 
     if (diffToActualNextTarget <= _captureAngleThreshold) {
       newGuidance = "Perfect! Hold steady at $actualTargetNameForText";
-      newIcon = Icons.check_circle;
       // Only speak "Perfect" or "Hold Steady" if it's a new state or different target
       if (newGuidance != _scanGuidance) shouldSpeakGuidance = true;
     } else {
@@ -552,7 +547,6 @@ class _NavigationLocalizationScreenState
           _getTurnDirection(_currentHeading!, actualNextTargetForTextGuidance);
       newGuidance =
           "Turn $turnDir to $actualTargetNameForText (${diffToActualNextTarget.round()}°)";
-      newIcon = turnDir == "right" ? Icons.arrow_forward : Icons.arrow_back;
       // Always speak turn instructions if they are different from previous guidance
       if (newGuidance != _scanGuidance) shouldSpeakGuidance = true;
     }
@@ -589,7 +583,6 @@ class _NavigationLocalizationScreenState
       return;
     }
 
-    bool captureMadeThisTick = false;
     int? currentlyAlignedUnscannedAngle = null;
 
     // First, check if we are aligned with ANY unscanned target
@@ -621,7 +614,6 @@ class _NavigationLocalizationScreenState
           _debugLog(
               "Dwell time met for $currentlyAlignedUnscannedAngle. Attempting capture.");
           bool success = await _captureAndStoreEmbedding();
-          captureMadeThisTick = true;
 
           if (success) {
             if (mounted) {
@@ -631,8 +623,6 @@ class _NavigationLocalizationScreenState
               _debugLog(
                   'Successfully scanned angle: $currentlyAlignedUnscannedAngle. Scan count: $_scanCount360/$_totalScansNeeded. Scanned directions map: $_scannedDirections');
 
-              String successMessage =
-                  "${_getDirectionName(currentlyAlignedUnscannedAngle)} scanned (${_scanCount360}/${_totalScansNeeded})";
               // _debugLog(successMessage); // Original log, now covered by the one above mostly
 
               int newNextTargetAngle = _targetAngles

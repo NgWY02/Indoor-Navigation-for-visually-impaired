@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../services/supabase_service.dart';
+import '../../services/supabase_service.dart';
 import 'map_management.dart';
 
 class AdminPanel extends StatefulWidget {

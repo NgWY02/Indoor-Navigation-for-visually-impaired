@@ -9,8 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'services/supabase_service.dart';
-import 'services/clip_service.dart';
+import 'lib/services/supabase_service.dart';
+import 'lib/services/clip_service.dart';
 import 'package:flutter/foundation.dart'; 
 
 // Utility function for reshaping lists (from navigation_screen)

@@ -7,7 +7,7 @@ import '../../services/clip_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/position_localization_service.dart';
 import '../../services/real_time_navigation_service.dart' as nav_service;
-import '../../widgets/debug_overlay.dart'; // 🐛 Debug overlay
+import '../../widgets/debug_overlay.dart'; 
 
 class NavigationMainScreen extends StatefulWidget {
   final CameraDescription camera;
@@ -19,7 +19,7 @@ class NavigationMainScreen extends StatefulWidget {
 }
 
 class _NavigationMainScreenState extends State<NavigationMainScreen> 
-    with WidgetsBindingObserver, DebugOverlayMixin { // 🐛 Add debug overlay mixin
+    with WidgetsBindingObserver, DebugOverlayMixin { 
   // Services
   late ClipService _clipService;
   late SupabaseService _supabaseService;
@@ -53,13 +53,13 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _frameProcessingTimer?.cancel();
-    _cameraController?.dispose();
+    _disposeCamera(); // Use the safe disposal method
     _navigationService.dispose();
     _localizationService.dispose();
     super.dispose();
   }
 
-  // 🧪 Override debug mixin method to test step counter
+  // Override debug mixin method to test step counter
   @override
   void testStepCounter() {
     _navigationService.testStepCounter();
@@ -67,12 +67,14 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!_isCameraInitialized || _cameraController == null) return;
-
-    if (state == AppLifecycleState.inactive) {
-      _cameraController?.dispose();
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // Dispose camera when app goes to background
+      _disposeCamera();
     } else if (state == AppLifecycleState.resumed) {
-      _initializeCamera();
+      // Reinitialize camera when app resumes
+      if (!_isCameraInitialized) {
+        _initializeCamera();
+      }
     }
   }
 
@@ -91,7 +93,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         onStatusUpdate: _onStatusUpdate,
         onInstructionUpdate: _onInstructionUpdate,
         onError: _onError,
-        onDebugUpdate: updateDebugInfo, // 🐛 Debug callback
+        onDebugUpdate: updateDebugInfo, // 
       );
 
       // Initialize camera
@@ -109,6 +111,9 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
   Future<void> _initializeCamera() async {
     try {
+      // Dispose existing controller if it exists and is disposed
+      await _disposeCamera();
+      
       // Request permissions including step counter
       final permissions = await [
         Permission.camera,
@@ -133,12 +138,39 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
       await _cameraController!.initialize();
       
-      setState(() {
-        _isCameraInitialized = true;
-      });
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = true;
+        });
+      }
 
     } catch (e) {
+      print('Error initializing camera: $e');
+      if (mounted) {
+        setState(() {
+          _isCameraInitialized = false;
+        });
+      }
       _onError('Failed to initialize camera: $e');
+    }
+  }
+
+  Future<void> _disposeCamera() async {
+    if (_cameraController != null) {
+      try {
+        if (_cameraController!.value.isInitialized) {
+          await _cameraController!.dispose();
+        }
+      } catch (e) {
+        print('Error disposing camera: $e');
+      } finally {
+        _cameraController = null;
+        if (mounted) {
+          setState(() {
+            _isCameraInitialized = false;
+          });
+        }
+      }
     }
   }
 
@@ -219,7 +251,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     await _navigationService.startNavigation(_selectedRoute!);
     
     // Start periodic frame processing for navigation
-    _frameProcessingTimer = Timer.periodic(Duration(seconds: 2), (_) {
+    _frameProcessingTimer = Timer.periodic(Duration(seconds: 1), (_) {
       _processNavigationFrame();
     });
   }
@@ -286,7 +318,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack( // 🐛 Wrap in Stack for debug overlay
+        child: Stack( 
           children: [
             Column(
               children: [
