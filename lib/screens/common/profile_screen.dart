@@ -40,8 +40,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _isLoading = false;
         });
       } else {
-        // User is not logged in, navigate back to login
-        Navigator.of(context).pushReplacementNamed('/login');
+        // User is not logged in, navigate back to home (AuthWrapper will handle login)
+        Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
       }
     } catch (e) {
       print('Error loading user data: $e');
@@ -54,8 +54,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     try {
       await _supabaseService.signOut();
-      // Navigate to login screen after sign out
-      Navigator.of(context).pushReplacementNamed('/login');
+      // Navigate to home (AuthWrapper will handle showing login screen)
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error signing out: $e'))

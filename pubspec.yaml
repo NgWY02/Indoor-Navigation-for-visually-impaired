@@ -26,8 +26,8 @@ dependencies:
   pedometer: ^4.1.1
   sensors_plus: ^6.1.1
   collection: ^1.18.0
-  flutter_vision: ^1.1.4
   flutter_dotenv: ^5.2.1
+  app_links: ^6.3.2
   
 flutter:
   uses-material-design: true

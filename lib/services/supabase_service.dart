@@ -13,6 +13,14 @@ enum UserRole {
   admin,
 }
 
+// Custom wrapper class for signup results
+class SignUpResult {
+  final AuthResponse authResponse;
+  final bool isNewUser;
+  
+  SignUpResult({required this.authResponse, required this.isNewUser});
+}
+
 class SupabaseService {
   static final SupabaseService _instance = SupabaseService._internal();
   final uuid = Uuid();
@@ -379,6 +387,64 @@ class SupabaseService {
   }
 
   // Authentication Methods
+
+  // Helper method to check if email already exists using RPC
+  Future<bool> checkEmailExists(String email) async {
+    try {
+      final result = await client.rpc(
+        'email_exists',
+        params: {'email_to_check': email.trim()},
+      );
+      print('RPC email_exists check for "$email": $result');
+      return result as bool;
+    } catch (e) {
+      print('Error calling email_exists RPC: $e');
+      // If the RPC fails for any reason (e.g., network error, function not found),
+      // it's safer to allow the signup attempt to proceed and let Supabase handle it.
+      // Returning true here would block all registrations if the function is broken.
+      return false;
+    }
+  }
+  
+  Future<SignUpResult> signUpWithCheck({
+    required String email,
+    required String password,
+    required UserRole role,
+    Map<String, dynamic>? data,
+  }) async {
+    final authResponse = await signUp(
+      email: email,
+      password: password,
+      role: role,
+      data: data,
+    );
+    
+    // Extract the isNewUser information from the logs or re-check
+    bool isNewUser = false;
+    if (authResponse.user != null) {
+      try {
+        final existingRole = await client
+            .from('user_roles')
+            .select('user_id')
+            .eq('user_id', authResponse.user!.id)
+            .maybeSingle();
+        
+        // FIXED LOGIC: If NOT found in user_roles, it's a new user
+        // If found in user_roles, it's an existing user
+        isNewUser = existingRole == null; // If NOT found, it's new
+        
+        print('User check: existingRole = ${existingRole != null ? "found" : "not found"}, isNewUser = $isNewUser');
+        
+      } catch (e) {
+        print('Error re-checking user_roles for isNewUser: $e');
+        // Fallback: if we can't check and session is null, assume new user
+        isNewUser = authResponse.session == null;
+      }
+    }
+    
+    return SignUpResult(authResponse: authResponse, isNewUser: isNewUser);
+  }
+  
   Future<AuthResponse> signUp({
     required String email,
     required String password,
@@ -388,27 +454,65 @@ class SupabaseService {
     data ??= {};
     data['role'] = role == UserRole.admin ? 'admin' : 'user';
 
-    print('Attempting Supabase signup for email: $email'); // Log before signup call
+    print('Attempting Supabase signup for email: $email');
     AuthResponse response;
+    bool isNewUser = false;
+    
     try {
        response = await client.auth.signUp(
         email: email,
         password: password,
         data: data,
+        // Add redirect URL specifically for email confirmation
+        // This ensures confirmation links go to the correct handler
+        emailRedirectTo: 'com.example.indoornavigation://auth/callback',
       );
-      // Log the response details
+      
       print('Supabase signup response received.');
       print('  - User: ${response.user?.id ?? 'null'}');
-      print('  - Session: ${response.session?.accessToken ?? 'null'}');
+      print('  - User Email: ${response.user?.email ?? 'null'}');
+      print('  - User Email Confirmed: ${response.user?.emailConfirmedAt ?? 'null'}');
+      print('  - Session: ${response.session?.accessToken != null ? "exists" : "null"}');
+      
+      // Key insight: Check if this user already exists in our user_roles table
+      // If they don't exist in user_roles but have a user object, they might be:
+      // 1. A completely new user (should be added to user_roles)
+      // 2. An existing user who was created outside our app
+      
+      if (response.user != null) {
+        try {
+          // Check if user already exists in our user_roles table
+          final existingRole = await client
+              .from('user_roles')
+              .select('user_id')
+              .eq('user_id', response.user!.id)
+              .maybeSingle();
+          
+          if (existingRole != null) {
+            // User already exists in our system
+            print('User already exists in user_roles table');
+            isNewUser = false;
+          } else {
+            // User doesn't exist in user_roles, this is a new signup
+            print('User does not exist in user_roles table - new signup');
+            isNewUser = true;
+          }
+        } catch (e) {
+          print('Error checking user_roles table: $e');
+          // If we can't check, assume it's new (safer for UX)
+          isNewUser = true;
+        }
+      }
+      
     } catch (authError) {
        print('Error during client.auth.signUp: $authError');
-       // Re-throw the error or handle it appropriately
+       // Re-throw the error for UI to handle
        throw authError;
     }
 
 
-    if (response.user != null) {
-      print('Signup successful, user object exists. Attempting to insert role into user_roles table.'); // Log entering the if block
+    if (response.user != null && isNewUser) {
+      print('New user signup detected - inserting into user_roles table.'); 
       try {
         // Generate a UUID for the 'id' column
         final String newRoleId = uuid.v4();
@@ -472,9 +576,14 @@ class SupabaseService {
       } catch (e) {
         print('Post-signup ensure (name/invite_code) failed: $e');
       }
+    } else if (response.user != null && !isNewUser) {
+        print('Existing user detected - skipping user_roles insert.'); 
     } else {
-        print('Signup response did not contain a user object. Skipping user_roles insert.'); // Log if user is null
+        print('Signup response did not contain a user object. Skipping user_roles insert.'); 
     }
+
+    // For debugging: log the final decision
+    print('Final signup result: User exists: ${response.user != null}, IsNewUser: $isNewUser');
 
     return response;
   }
@@ -569,17 +678,82 @@ class SupabaseService {
 
   Future<void> resetPassword(String email) async {
     try {
-      // Send password reset email with custom redirect URL to our HTML page
-      // This will work for both development and production
+      // Send password reset email with custom redirect URL to our app
+      // This will use the deep link scheme for the app
       await client.auth.resetPasswordForEmail(
         email,
-        redirectTo: 'http://localhost:3000/reset-password.html',
+        redirectTo: 'com.example.indoornavigation://auth/callback',
       );
     } catch (e) {
       print('Reset password error: $e');
       throw Exception('Failed to send reset email. Please try again.');
     }
   }
+
+  Future<void> updatePassword({
+    required String newPassword,
+    String? accessToken,
+    String? refreshToken,
+  }) async {
+    try {
+      // If we have tokens from the reset link, establish a session first
+      if (accessToken != null && refreshToken != null) {
+        print('Setting session from password reset tokens');
+        
+        // Create a session using the tokens from the reset link
+        final response = await client.auth.setSession(refreshToken);
+        
+        if (response.session != null) {
+          print('Session established successfully');
+          
+          // Now update the password
+          final updateResponse = await client.auth.updateUser(
+            UserAttributes(password: newPassword),
+          );
+          
+          print('Password update response: ${updateResponse.user?.id}');
+        } else {
+          throw Exception('Could not establish session with reset tokens');
+        }
+        
+      } else {
+        // Fallback: try to update password with current session
+        await client.auth.updateUser(
+          UserAttributes(password: newPassword),
+        );
+      }
+      
+    } catch (e) {
+      print('Password update error: $e');
+      throw Exception('Failed to update password. Please try again.');
+    }
+  }
+
+  Future<Session?> exchangeCodeForSession(String authCode) async {
+    try {
+      // Use getSessionFromUrl method instead of exchangeCodeForSession
+      // The authCode should be processed as a full URL callback
+      final callbackUrl = 'com.example.indoornavigation://auth/callback?code=$authCode';
+      
+      final response = await client.auth.getSessionFromUrl(Uri.parse(callbackUrl));
+      
+      return response.session;
+      
+    } catch (e) {
+      // Try alternative method - setSession with the authorization code
+      try {
+        await client.auth.exchangeCodeForSession(authCode);
+        final currentSession = client.auth.currentSession;
+        if (currentSession != null) {
+          return currentSession;
+        }
+      } catch (e2) {
+        // Alternative method also failed
+      }
+      throw Exception('Failed to process password reset link. Please try again.');
+    }
+  }
+  
   
   // Admin specific methods
   Future<List<Map<String, dynamic>>> getAllUsers() async {

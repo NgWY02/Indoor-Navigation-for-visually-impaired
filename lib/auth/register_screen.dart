@@ -56,7 +56,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      final response = await _supabaseService.signUp(
+      // Step 1: Check if the email already exists using our new RPC function
+      final emailExists = await _supabaseService.checkEmailExists(_emailController.text.trim());
+      
+      if (emailExists) {
+        setState(() {
+          _errorMessage = 'This email is already registered. Please try logging in.';
+          _isLoading = false;
+        });
+        return; // Stop the registration process
+      }
+      
+      // Step 2: If email does not exist, proceed with signup
+      final result = await _supabaseService.signUpWithCheck(
         email: _emailController.text.trim(),
         password: _passwordController.text,
         role: _isAdmin ? UserRole.admin : UserRole.user,
@@ -67,7 +79,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       
       if (!mounted) return;
       
-      if (response.user != null) {
+      // This part now handles only successful new signups
+      if (result.authResponse.user != null && result.isNewUser) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Registration successful! Please check your email to confirm your account.'),
@@ -76,13 +89,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
         );
         Navigator.of(context).pop(); // Go back to login screen
       } else {
+        // This case should now be rare, but we'll handle it
         setState(() {
-          _errorMessage = 'Registration failed. Please try again.';
+          _errorMessage = 'An unexpected error occurred. The email might already be registered.';
         });
       }
     } catch (e) {
+      // Handle explicit errors thrown by our service or Supabase
+      String errorMessage = 'Registration failed. Please try again.';
+      
+      // Check for specific error messages
+      String errorString = e.toString().toLowerCase();
+      if (errorString.contains('already registered') || 
+          errorString.contains('already exists') || 
+          errorString.contains('user already registered')) {
+        errorMessage = 'This email is already registered. Please use a different email or try logging in.';
+      } else if (errorString.contains('invalid email')) {
+        errorMessage = 'Please enter a valid email address.';
+      } else if (errorString.contains('weak password') || errorString.contains('password')) {
+        errorMessage = 'Password is too weak. Please use a stronger password.';
+      } else if (errorString.contains('network') || errorString.contains('connection')) {
+        errorMessage = 'Network error. Please check your internet connection and try again.';
+      }
+      
       setState(() {
-        _errorMessage = e.toString();
+        _errorMessage = errorMessage;
       });
     } finally {
       if (mounted) {
@@ -97,96 +128,89 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
     final screenWidth = mediaQuery.size.width;
-    final isTablet = screenWidth > 600;
-    final isLargeTablet = screenWidth > 900;
+    final keyboardHeight = mediaQuery.viewInsets.bottom;
+    final isKeyboardVisible = keyboardHeight > 0;
     
-    // Calculate responsive values
-    final horizontalPadding = isLargeTablet ? 48.0 : (isTablet ? 32.0 : 16.0);
-    final verticalPadding = isTablet ? 24.0 : 16.0;
-    final bottomSafeArea = mediaQuery.padding.bottom;
-    final hasBottomNavigation = bottomSafeArea > 0;
+    // Phone-focused responsive sizing
+    final iconSize = isKeyboardVisible ? 50.0 : 70.0;
+    final titleFontSize = screenWidth < 360 ? 20.0 : 22.0;
+    final horizontalPadding = screenWidth * 0.05; 
+    final verticalSpacing = isKeyboardVisible ? 10.0 : 16.0;
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          'Register',
-          style: TextStyle(
-            fontSize: isTablet ? 22 : 20,
-          ),
-        ),
+        title: const Text('Register'),
+        elevation: 0,
+        backgroundColor: Colors.blue.shade700,
+        foregroundColor: Colors.white,
       ),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: EdgeInsets.only(
-              left: horizontalPadding,
-              right: horizontalPadding,
-              top: verticalPadding,
-              bottom: hasBottomNavigation ? verticalPadding + 16 : verticalPadding,
-            ),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: isLargeTablet ? 600 : double.infinity,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: EdgeInsets.symmetric(
+                horizontal: horizontalPadding.clamp(16.0, 24.0),
+                vertical: 16.0,
               ),
               child: Form(
                 key: _formKey,
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      Icons.person_add,
-                      size: isTablet ? 100 : 80,
-                      color: Colors.blue,
-                    ),
-                    SizedBox(height: isTablet ? 40 : 32),
+                    if (!isKeyboardVisible) ...[
+                      Icon(
+                        Icons.person_add,
+                        size: iconSize,
+                        color: Colors.blue,
+                      ),
+                      SizedBox(height: verticalSpacing),
+                    ],
                     Text(
                       'Create an Account',
                       textAlign: TextAlign.center,
                       style: TextStyle(
-                        fontSize: isTablet ? 28 : 24,
+                        fontSize: titleFontSize,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    SizedBox(height: isTablet ? 40 : 32),
-                    if (_errorMessage != null)
+                    SizedBox(height: verticalSpacing * 1.5),
+                    if (_errorMessage != null) ...[
                       Container(
-                        padding: EdgeInsets.all(isTablet ? 12 : 8),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red[100],
+                          color: Colors.red[50],
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(color: Colors.red.shade300),
                         ),
                         child: Row(
                           children: [
-                            Icon(Icons.error_outline, color: Colors.red.shade700),
-                            SizedBox(width: 8),
+                            Icon(Icons.error_outline, 
+                                 color: Colors.red.shade700, size: 20),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 _errorMessage!,
                                 style: TextStyle(
-                                  color: Colors.red.shade900,
-                                  fontSize: isTablet ? 16 : 14,
+                                  color: Colors.red.shade800,
+                                  fontSize: 14,
                                 ),
                               ),
                             ),
                           ],
                         ),
                       ),
-                    SizedBox(height: isTablet ? 20 : 16),
+                      SizedBox(height: verticalSpacing),
+                    ],
                     TextFormField(
                       controller: _nameController,
-                      style: TextStyle(fontSize: isTablet ? 18 : 16),
-                      decoration: InputDecoration(
+                      style: const TextStyle(fontSize: 16),
+                      decoration: const InputDecoration(
                         labelText: 'Full Name',
-                        labelStyle: TextStyle(fontSize: isTablet ? 16 : 14),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
-                        ),
-                        prefixIcon: Icon(Icons.person, size: isTablet ? 24 : 20),
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.person),
                         contentPadding: EdgeInsets.symmetric(
-                          horizontal: isTablet ? 16 : 12,
-                          vertical: isTablet ? 20 : 16,
+                          horizontal: 16,
+                          vertical: 16,
                         ),
                       ),
                       validator: (value) {
@@ -196,90 +220,116 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         return null;
                       },
                     ),
-                    SizedBox(height: isTablet ? 20 : 16),
-                TextFormField(
-                  controller: _emailController,
-                  decoration: const InputDecoration(
-                    labelText: 'Email',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.email),
-                  ),
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter your email';
-                    }
-                    if (!value.contains('@') || !value.contains('.')) {
-                      return 'Please enter a valid email';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _passwordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Password',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock),
-                  ),
-                  obscureText: true,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please enter a password';
-                    }
-                    if (value.length < 6) {
-                      return 'Password should be at least 6 characters';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _confirmPasswordController,
-                  decoration: const InputDecoration(
-                    labelText: 'Confirm Password',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.lock_outline),
-                  ),
-                  obscureText: true,
-                  validator: (value) {
-                    if (value == null || value.isEmpty) {
-                      return 'Please confirm your password';
-                    }
-                    if (value != _passwordController.text) {
-                      return 'Passwords do not match';
-                    }
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 16),
-                
-                // Only show this if admin creation is allowed
-                if (widget.allowAdminCreation)
-                  SwitchListTile(
-                    title: const Text('Register as Admin'),
-                    subtitle: const Text('Special privileges for system management'),
-                    value: _isAdmin,
-                    onChanged: (value) {
-                      setState(() {
-                        _isAdmin = value;
-                        _showAdminCodeField = value;
-                      });
-                    },
-                  ),
-                
-                // Admin code field - only shown when admin option selected
-                if (_showAdminCodeField)
-                  Column(
-                    children: [
-                      const SizedBox(height: 16),
+                    SizedBox(height: verticalSpacing),
+                    TextFormField(
+                      controller: _emailController,
+                      style: const TextStyle(fontSize: 16),
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.email),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
+                      ),
+                      keyboardType: TextInputType.emailAddress,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your email';
+                        }
+                        if (!value.contains('@') || !value.contains('.')) {
+                          return 'Please enter a valid email';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: verticalSpacing),
+                    TextFormField(
+                      controller: _passwordController,
+                      style: const TextStyle(fontSize: 16),
+                      decoration: const InputDecoration(
+                        labelText: 'Password',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.lock),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
+                      ),
+                      obscureText: true,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter a password';
+                        }
+                        if (value.length < 6) {
+                          return 'Password should be at least 6 characters';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: verticalSpacing),
+                    TextFormField(
+                      controller: _confirmPasswordController,
+                      style: const TextStyle(fontSize: 16),
+                      decoration: const InputDecoration(
+                        labelText: 'Confirm Password',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.lock_outline),
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
+                      ),
+                      obscureText: true,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please confirm your password';
+                        }
+                        if (value != _passwordController.text) {
+                          return 'Passwords do not match';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: verticalSpacing),
+                    
+                    // Only show this if admin creation is allowed
+                    if (widget.allowAdminCreation)
+                      Card(
+                        child: SwitchListTile(
+                          title: const Text(
+                            'Register as Admin',
+                            style: TextStyle(fontSize: 16),
+                          ),
+                          subtitle: const Text(
+                            'Special privileges for system management',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          value: _isAdmin,
+                          onChanged: (value) {
+                            setState(() {
+                              _isAdmin = value;
+                              _showAdminCodeField = value;
+                            });
+                          },
+                        ),
+                      ),
+                    
+                    // Admin code field - only shown when admin option selected
+                    if (_showAdminCodeField) ...[
+                      SizedBox(height: verticalSpacing),
                       TextFormField(
                         controller: _adminCodeController,
+                        style: const TextStyle(fontSize: 16),
                         decoration: const InputDecoration(
                           labelText: 'Admin Registration Code',
                           border: OutlineInputBorder(),
                           prefixIcon: Icon(Icons.admin_panel_settings),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
                         ),
                         obscureText: true,
                         validator: (value) {
@@ -292,52 +342,50 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         },
                       ),
                     ],
-                  ),
-                
-                    SizedBox(height: isTablet ? 32 : 24),
+                    
+                    SizedBox(height: verticalSpacing * 2),
                     ElevatedButton(
                       onPressed: _isLoading ? null : _signUp,
                       style: ElevatedButton.styleFrom(
-                        padding: EdgeInsets.symmetric(
-                          vertical: isTablet ? 20 : 16,
-                          horizontal: isTablet ? 24 : 16,
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       child: _isLoading
-                          ? SizedBox(
-                              height: isTablet ? 24 : 20,
-                              width: isTablet ? 24 : 20,
-                              child: const CircularProgressIndicator(
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
                                 color: Colors.white,
                                 strokeWidth: 2,
                               ),
                             )
-                          : Text(
+                          : const Text(
                               'Register',
                               style: TextStyle(
-                                fontSize: isTablet ? 18 : 16,
+                                fontSize: 16,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                     ),
-                    SizedBox(height: isTablet ? 20 : 16),
+                    SizedBox(height: verticalSpacing),
                     TextButton(
                       onPressed: () {
                         Navigator.of(context).pop();
                       },
-                      child: Text(
+                      child: const Text(
                         'Already have an account? Login',
-                        style: TextStyle(fontSize: isTablet ? 16 : 14),
+                        style: TextStyle(fontSize: 14),
                       ),
                     ),
+                    // Extra bottom padding for safe area
+                    SizedBox(height: mediaQuery.padding.bottom + 16),
                   ],
                 ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );

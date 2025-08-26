@@ -153,17 +153,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                                         fontSize: 14,
                                       ),
                                     ),
-                                    if (_isSuccess) ...[
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        '📧 Check your email and click the reset link.\n\n🌐 The link will open a secure webpage where you can enter your new password.\n\n⚡ Make sure the web server is running (see PASSWORD_RESET_SETUP.md for instructions).\n\n🔒 Your password will be updated instantly!',
-                                        style: TextStyle(
-                                          color: Colors.green.shade700,
-                                          fontSize: 12,
-                                          height: 1.4,
-                                        ),
-                                      ),
-                                    ],
+
                                   ],
                                 ),
                               ),
