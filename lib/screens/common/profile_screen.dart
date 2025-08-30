@@ -32,15 +32,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final user = _supabaseService.currentUser;
       if (user != null) {
         final isAdmin = await _supabaseService.isAdmin();
-        // final profile = await _supabaseService.getCurrentUserProfile(); // Removed for simplified single-user experience
+        // final profile = await _supabaseService.getCurrentUserProfile(); 
         
         setState(() {
           _userEmail = user.email ?? 'No email available';
           _isAdmin = isAdmin;
           _isLoading = false;
         });
-        
-        // User invite code functionality removed for simplified single-user experience
+      
       } else {
         // User is not logged in, navigate back to home (AuthWrapper will handle login)
         Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
@@ -72,141 +71,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
     );
   }
-
-  /*
-  void _showQuickInviteDialog(BuildContext context) {
-    final TextEditingController userCodeController = TextEditingController();
-    String? selectedGroupId;
-    List<Map<String, dynamic>> myGroups = [];
-    bool isLoading = true;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          if (isLoading) {
-            // Load groups when dialog opens
-            _supabaseService.getGroupsICreated().then((groups) {
-              setDialogState(() {
-                myGroups = groups;
-                isLoading = false;
-                if (groups.isNotEmpty) {
-                  selectedGroupId = groups.first['id'];
-                }
-              });
-            }).catchError((error) {
-              setDialogState(() {
-                isLoading = false;
-              });
-              print('Error loading groups: $error');
-            });
-          }
-
-          return AlertDialog(
-            title: const Text('Quick Invite User'),
-            content: SizedBox(
-              width: 300,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Enter user code to invite:'),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: userCodeController,
-                    decoration: const InputDecoration(
-                      hintText: 'e.g. ABC123',
-                      border: OutlineInputBorder(),
-                    ),
-                    textCapitalization: TextCapitalization.characters,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text('Select group:'),
-                  const SizedBox(height: 8),
-                  if (isLoading)
-                    const Center(child: CircularProgressIndicator())
-                  else if (myGroups.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.orange.shade200),
-                      ),
-                      child: const Text(
-                        'No groups found. Create a group first in Group Management.',
-                        style: TextStyle(color: Colors.orange),
-                      ),
-                    )
-                  else
-                    DropdownButtonFormField<String>(
-                      value: selectedGroupId,
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                      ),
-                      items: myGroups.map((group) {
-                        return DropdownMenuItem<String>(
-                          value: group['id'],
-                          child: Text(group['name'] ?? 'Unnamed Group'),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedGroupId = value;
-                        });
-                      },
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-              ElevatedButton(
-                onPressed: (myGroups.isEmpty || userCodeController.text.isEmpty)
-                    ? null
-                    : () => _inviteUser(context, userCodeController.text.trim(), selectedGroupId!),
-                child: const Text('Invite'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _inviteUser(BuildContext context, String userCode, String groupId) async {
-    Navigator.of(context).pop(); // Close dialog first
-
-    try {
-      await _supabaseService.addUserToGroupByCode(
-        groupId: groupId,
-        userCode: userCode.toUpperCase(),
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('User $userCode successfully invited to group!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      String message = 'Failed to invite user';
-      if (e.toString().contains('User code not found')) {
-        message = 'User code "$userCode" not found. Please check and try again.';
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-  */
 
   @override
   Widget build(BuildContext context) {
@@ -393,20 +257,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildAdminActions(BuildContext context, double cardPadding, double titleFontSize, double subtitleFontSize) {
     return Column(
       children: [
-        // Quick Invite removed for simplified single-user experience
-        /*
-        _buildActionTile(
-          icon: Icons.person_add,
-          title: 'Quick Invite',
-          subtitle: 'Add user to group by user code',
-          color: Colors.green.shade600,
-          onTap: () => _showQuickInviteDialog(context),
-          cardPadding: cardPadding,
-          titleFontSize: titleFontSize,
-          subtitleFontSize: subtitleFontSize,
-        ),
-        SizedBox(height: cardPadding * 0.6),
-        */
         _buildActionTile(
           icon: Icons.people,
           title: 'User Management',
