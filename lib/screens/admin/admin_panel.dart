@@ -180,7 +180,6 @@ class _AdminPanelState extends State<AdminPanel> {
                           final userRole = user['role'] == 'admin' ? UserRole.admin : UserRole.user;
                           final profiles = user['profiles'] as Map<String, dynamic>?;
                           final email = profiles != null ? profiles['email'] as String? : 'No email';
-                          final name = profiles != null ? profiles['name'] as String? : 'Unknown';
                           
                           return Card(
                             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -194,11 +193,10 @@ class _AdminPanelState extends State<AdminPanel> {
                                   color: Colors.white,
                                 ),
                               ),
-                              title: Text(name ?? 'Unknown'),
+                              title: Text(email ?? 'No email'),
                               subtitle: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(email ?? 'No email'),
                                   Text(
                                     'Role: ${userRole == UserRole.admin ? 'Admin' : 'User'}',
                                     style: TextStyle(

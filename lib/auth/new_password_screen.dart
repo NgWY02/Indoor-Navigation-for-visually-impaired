@@ -329,7 +329,13 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
                         SizedBox(height: verticalSpacing),
                         
                         TextButton(
-                          onPressed: () {
+                          onPressed: () async {
+                            // Sign out first to clear any session; otherwise AuthWrapper
+                            // may detect an active session and navigate to dashboard.
+                            try {
+                              await _supabaseService.signOut();
+                            } catch (_) {}
+                            if (!mounted) return;
                             Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
                           },
                           child: const Text(
