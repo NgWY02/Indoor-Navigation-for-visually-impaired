@@ -1962,15 +1962,35 @@ class SupabaseService {
       // First, get the user ID from email
       final userResponse = await client
           .from('profiles')
-          .select('id')
+          .select('id, organization_id')
           .eq('email', userEmail)
           .maybeSingle();
 
       if (userResponse == null) {
-        throw Exception('User not found');
+        throw Exception('User with email "$userEmail" not found. Please check the email address and try again.');
       }
 
       final userId = userResponse['id'];
+      final currentOrgId = userResponse['organization_id'];
+
+      // Check if user is already in another organization
+      if (currentOrgId != null && currentOrgId != organizationId) {
+        // Get the current organization name for better error message
+        final currentOrgResponse = await client
+            .from('organizations')
+            .select('name')
+            .eq('id', currentOrgId)
+            .maybeSingle();
+
+        final currentOrgName = currentOrgResponse?['name'] ?? 'another organization';
+        throw Exception('User is already assigned to "$currentOrgName". Please remove them from their current organization first.');
+      }
+
+      // If user is already in the target organization, no need to do anything
+      if (currentOrgId == organizationId) {
+        print('User $userEmail is already in organization $organizationId');
+        return;
+      }
 
       // Update user's organization
       final response = await client
@@ -2059,16 +2079,22 @@ class SupabaseService {
       // First, get the user and their current organization
       final userResponse = await client
           .from('profiles')
-          .select('id, organization_id')
+          .select('id, organization_id, email')
           .eq('email', userEmail)
           .maybeSingle();
 
       if (userResponse == null) {
-        throw Exception('User not found');
+        throw Exception('User with email "$userEmail" not found. Please check the email address and try again.');
       }
 
       final userId = userResponse['id'];
       final userOrgId = userResponse['organization_id'];
+
+      // If user is not in any organization, no need to do anything
+      if (userOrgId == null) {
+        print('User $userEmail is not in any organization');
+        return;
+      }
 
       // If user is in an organization, verify admin has access to it
       if (userOrgId != null) {
@@ -2321,6 +2347,49 @@ class SupabaseService {
     } catch (e) {
       print('Error creating organization: $e');
       throw Exception('Failed to create organization: ${e.toString()}');
+    }
+  }
+
+  // Get users by organization
+  Future<List<Map<String, dynamic>>> getUsersByOrganization(String organizationId) async {
+    try {
+      // Verify admin permissions
+      final isAdmin = await this.isAdmin();
+      if (!isAdmin) {
+        throw Exception('Admin privileges required');
+      }
+
+      final user = currentUser;
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // 🔒 SECURITY CHECK: Verify the current admin has access to this organization
+      final orgResponse = await client
+          .from('organizations')
+          .select('created_by_admin_id, name')
+          .eq('id', organizationId)
+          .maybeSingle();
+
+      if (orgResponse == null) {
+        throw Exception('Organization not found');
+      }
+
+      if (orgResponse['created_by_admin_id'] != user.id) {
+        throw Exception('You do not have permission to view users in this organization');
+      }
+
+      // Get all users in this organization
+      final usersResponse = await client
+          .from('profiles')
+          .select('id, email, name, role, created_at')
+          .eq('organization_id', organizationId)
+          .order('name', ascending: true);
+
+      return List<Map<String, dynamic>>.from(usersResponse);
+    } catch (e) {
+      print('Error fetching users by organization: $e');
+      throw Exception('Failed to fetch users: ${e.toString()}');
     }
   }
 

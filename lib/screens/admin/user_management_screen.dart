@@ -11,13 +11,13 @@ class UserManagementScreen extends StatefulWidget {
 class _UserManagementScreenState extends State<UserManagementScreen> {
   final SupabaseService _supabaseService = SupabaseService();
 
-  List<Map<String, dynamic>> _users = [];
   List<Map<String, dynamic>> _organizations = [];
+  List<Map<String, dynamic>> _users = [];
   bool _isLoading = true;
   String? _errorMessage;
 
-  String? _selectedUserEmail;
   String? _selectedOrganizationId;
+  String _userEmailInput = '';
 
   @override
   void initState() {
@@ -42,19 +42,16 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         return;
       }
 
-      // Load users and organizations in parallel for better performance
-      final results = await Future.wait([
-        _supabaseService.getAllUsersWithOrganizations(),
-        _supabaseService.getAllOrganizations(),
-      ]);
+      // Load organizations
+      final organizations = await _supabaseService.getAllOrganizations();
 
-      final users = results[0];
-      final organizations = results[1];
+      // Load users with their organizations
+      final users = await _supabaseService.getAllUsersWithOrganizations();
 
       if (mounted) {
         setState(() {
-          _users = users;
           _organizations = organizations;
+          _users = users;
           _isLoading = false;
         });
       }
@@ -69,45 +66,30 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   Future<void> _assignUserToOrganization() async {
-    if (_selectedUserEmail == null || _selectedOrganizationId == null) {
+    if (_userEmailInput.isEmpty || _selectedOrganizationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select both user and organization')),
+        const SnackBar(content: Text('Please enter user email and select organization')),
       );
       return;
     }
 
     try {
       await _supabaseService.assignUserToOrganization(
-        _selectedUserEmail!,
+        _userEmailInput,
         _selectedOrganizationId!,
       );
 
-      // Update the local data instead of reloading everything for better performance
+      // Clear the input
       if (mounted) {
         setState(() {
-          // Find and update the user in the local list
-          final userIndex = _users.indexWhere((user) => user['email'] == _selectedUserEmail);
-          if (userIndex != -1) {
-            final selectedOrg = _organizations.firstWhere(
-              (org) => org['id'] == _selectedOrganizationId,
-              orElse: () => <String, dynamic>{},
-            );
-            _users[userIndex] = {
-              ..._users[userIndex],
-              'organization_id': _selectedOrganizationId,
-              'organizations': selectedOrg.isNotEmpty ? selectedOrg : null,
-            };
-          }
-
-          // Clear selections
-          _selectedUserEmail = null;
+          _userEmailInput = '';
           _selectedOrganizationId = null;
         });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User assigned successfully!')),
-        );
       }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User assigned successfully!')),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -238,37 +220,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  Future<void> _removeUserFromOrganization(String userEmail) async {
-    try {
-      await _supabaseService.removeUserFromOrganization(userEmail);
-
-      // Update the local data instead of reloading everything for better performance
-      if (mounted) {
-        setState(() {
-          // Find and update the user in the local list
-          final userIndex = _users.indexWhere((user) => user['email'] == userEmail);
-          if (userIndex != -1) {
-            _users[userIndex] = {
-              ..._users[userIndex],
-              'organization_id': null,
-              'organizations': null,
-            };
-          }
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('User removed from organization successfully!')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error removing user: ${e.toString()}')),
-        );
-      }
-    }
-  }
-
   Future<bool> _canDeleteOrganization(String organizationId) async {
     try {
       final currentUser = _supabaseService.currentUser;
@@ -297,16 +248,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       if (mounted) {
         setState(() {
           _organizations.removeWhere((org) => org['id'] == organizationId);
-          // Also update users that were in this organization
-          for (var i = 0; i < _users.length; i++) {
-            if (_users[i]['organization_id'] == organizationId) {
-              _users[i] = {
-                ..._users[i],
-                'organization_id': null,
-                'organizations': null,
-              };
-            }
-          }
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -384,7 +325,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('User Management'),
-        backgroundColor: Theme.of(context).primaryColor,
+        backgroundColor: Colors.blue.shade700,
         foregroundColor: Colors.white,
         elevation: 0,
       ),
@@ -398,49 +339,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header Section
-                Container(
-                  padding: EdgeInsets.all(verticalPadding),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).primaryColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.admin_panel_settings,
-                        color: Theme.of(context).primaryColor,
-                        size: isSmallScreen ? 24 : 28,
-                      ),
-                      SizedBox(width: horizontalPadding / 2),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Admin Dashboard',
-                              style: TextStyle(
-                                fontSize: isSmallScreen ? 16 : 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.grey[800],
-                              ),
-                            ),
-                            Text(
-                              'Manage users and organizations',
-                              style: TextStyle(
-                                fontSize: isSmallScreen ? 12 : 14,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                SizedBox(height: verticalPadding),
-
                 // Quick Actions Row
                 Row(
                   children: [
@@ -547,16 +445,18 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                                       ),
                                       SizedBox(width: 4),
                                       Text(
-                                        '$userCount users',
+                                        '$userCount ${userCount == 1 ? 'user' : 'users'}',
                                         style: TextStyle(
                                           fontSize: isSmallScreen ? 11 : 12,
                                           color: Colors.grey[500],
+                                          fontWeight: FontWeight.w500,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ],
                               ),
+                              onTap: () => _showOrganizationUsersDialog(org['id'], org['name'] ?? 'Organization'),
                               trailing: FutureBuilder<bool>(
                                 future: _canDeleteOrganization(org['id']),
                                 builder: (context, snapshot) {
@@ -602,161 +502,12 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
                 SizedBox(height: verticalPadding),
 
-                // Users Section
-                _buildSectionHeader(
-                  'Users',
-                  '(${_users.length})',
-                  isSmallScreen,
-                ),
-                SizedBox(height: verticalPadding / 2),
-
-                _users.isEmpty
-                    ? _buildEmptyState(
-                        'No users found',
-                        'Users will appear here once they register',
-                        Icons.people,
-                        isSmallScreen,
-                        verticalPadding,
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _users.length,
-                        itemBuilder: (context, index) {
-                          final user = _users[index];
-                          final organization = user['organizations'];
-                          final organizationName = organization?['name'] ?? 'No Organization';
-
-                          return Container(
-                            margin: EdgeInsets.only(bottom: verticalPadding / 2),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[200]!),
-                            ),
-                            child: ListTile(
-                              contentPadding: EdgeInsets.all(horizontalPadding / 2),
-                              leading: CircleAvatar(
-                                backgroundColor: Colors.grey[100],
-                                child: Icon(
-                                  Icons.person,
-                                  color: Theme.of(context).primaryColor,
-                                  size: isSmallScreen ? 20 : 24,
-                                ),
-                              ),
-                              title: Text(
-                                user['email'] ?? 'No Email',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: isSmallScreen ? 14 : 16,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  SizedBox(height: 4),
-                                  Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _getRoleColor(user['role']).withOpacity(0.1),
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Text(
-                                      user['role'] ?? 'user',
-                                      style: TextStyle(
-                                        fontSize: isSmallScreen ? 11 : 12,
-                                        color: _getRoleColor(user['role']),
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(height: 2),
-                                  Text(
-                                    organizationName,
-                                    style: TextStyle(
-                                      fontSize: isSmallScreen ? 12 : 14,
-                                      color: Colors.grey[600],
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ],
-                              ),
-                              trailing: organization != null
-                                  ? IconButton(
-                                      icon: Icon(
-                                        Icons.remove_circle_outline,
-                                        color: Colors.orange[400],
-                                        size: isSmallScreen ? 20 : 24,
-                                      ),
-                                      onPressed: () => _showRemoveDialog(user['email']),
-                                      tooltip: 'Remove from organization',
-                                    )
-                                  : null,
-                            ),
-                          );
-                        },
-                      ),
-
                 // Bottom padding for navigation bar
                 SizedBox(height: viewPadding.bottom + verticalPadding),
               ],
             ),
           ),
         ),
-      ),
-    );
-  }
-
-  void _showRemoveDialog(String userEmail) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenSize = mediaQuery.size;
-    final isSmallScreen = screenSize.width < 360;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Remove User from Organization',
-          style: TextStyle(
-            fontSize: isSmallScreen ? 16 : 18,
-          ),
-        ),
-        content: Text(
-          'Are you sure you want to remove $userEmail from their organization?',
-          style: TextStyle(
-            fontSize: isSmallScreen ? 14 : 16,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                fontSize: isSmallScreen ? 14 : 16,
-              ),
-            ),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _removeUserFromOrganization(userEmail);
-            },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: Text(
-              'Remove',
-              style: TextStyle(
-                fontSize: isSmallScreen ? 14 : 16,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -937,224 +688,476 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  Color _getRoleColor(String? role) {
-    switch (role?.toLowerCase()) {
-      case 'admin':
-        return Colors.red;
-      case 'moderator':
-        return Colors.orange;
-      case 'user':
-      default:
-        return Colors.blue;
-    }
-  }
-
   void _showAssignmentDialog(double horizontalPadding, double verticalPadding, EdgeInsets viewPadding) {
+    // Clear the email input when opening the dialog
+    _userEmailInput = '';
+
     final mediaQuery = MediaQuery.of(context);
     final screenSize = mediaQuery.size;
     final isSmallScreen = screenSize.width < 360;
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        constraints: BoxConstraints(
-          maxHeight: screenSize.height * 0.8,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Assign User to Organization',
+          style: TextStyle(
+            fontSize: isSmallScreen ? 18 : 20,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey[800],
+          ),
         ),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: EdgeInsets.all(horizontalPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Handle
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: EdgeInsets.only(bottom: verticalPadding),
-                decoration: BoxDecoration(
-                  color: Colors.grey[300],
-                  borderRadius: BorderRadius.circular(2),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // User Email Input
+              Text(
+                'User Email',
+                style: TextStyle(
+                  fontSize: isSmallScreen ? 14 : 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
                 ),
               ),
-            ),
+              SizedBox(height: verticalPadding / 2),
+              TextField(
+                controller: TextEditingController(text: _userEmailInput),
+                decoration: InputDecoration(
+                  hintText: 'Enter user email address',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.grey[300]!),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Theme.of(context).primaryColor),
+                  ),
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: horizontalPadding / 2,
+                    vertical: verticalPadding / 2,
+                  ),
+                ),
+                style: TextStyle(
+                  fontSize: isSmallScreen ? 14 : 16,
+                  color: Colors.grey[800],
+                ),
+                keyboardType: TextInputType.emailAddress,
+                onChanged: (value) {
+                  _userEmailInput = value.trim();
+                },
+              ),
 
-            // Title
+              SizedBox(height: verticalPadding),
+
+              // Organization Selection
+              Text(
+                'Select Organization',
+                style: TextStyle(
+                  fontSize: isSmallScreen ? 14 : 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
+              ),
+              SizedBox(height: verticalPadding / 2),
+              Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButtonFormField<String>(
+                  decoration: InputDecoration(
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: horizontalPadding / 2,
+                      vertical: verticalPadding / 2,
+                    ),
+                  ),
+                  value: _selectedOrganizationId,
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 14 : 16,
+                    color: Colors.grey[800],
+                  ),
+                  items: _organizations.map((org) {
+                    return DropdownMenuItem<String>(
+                      value: org['id'],
+                      child: Container(
+                        constraints: BoxConstraints(
+                          maxWidth: screenSize.width - (horizontalPadding * 4),
+                        ),
+                        child: Text(
+                          '${org['name']} - ${org['description']}',
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 12 : 14,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedOrganizationId = value;
+                    });
+                  },
+                ),
+              ),
+
+              SizedBox(height: verticalPadding * 1.5),
+
+              // Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: OutlinedButton.styleFrom(
+                        padding: EdgeInsets.symmetric(vertical: verticalPadding / 2),
+                        side: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 14 : 16,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ),
+                  ),
+                  SizedBox(width: horizontalPadding / 2),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        _assignUserToOrganization();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(vertical: verticalPadding / 2),
+                      ),
+                      child: Text(
+                        'Assign',
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 14 : 16,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showOrganizationUsersDialog(String organizationId, String organizationName) async {
+    final mediaQuery = MediaQuery.of(context);
+    final screenSize = mediaQuery.size;
+    final isSmallScreen = screenSize.width < 360;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Text(
-              'Assign User to Organization',
+              'Users in Organization',
               style: TextStyle(
-                fontSize: isSmallScreen ? 18 : 20,
+                fontSize: isSmallScreen ? 16 : 18,
                 fontWeight: FontWeight.bold,
                 color: Colors.grey[800],
               ),
             ),
-            SizedBox(height: verticalPadding),
-
-            // User Selection
+            SizedBox(height: 4),
             Text(
-              'Select User',
+              organizationName,
               style: TextStyle(
                 fontSize: isSmallScreen ? 14 : 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
+                color: Theme.of(context).primaryColor,
+                fontWeight: FontWeight.w500,
               ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
             ),
-            SizedBox(height: verticalPadding / 2),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: DropdownButtonFormField<String>(
-                decoration: InputDecoration(
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: horizontalPadding / 2,
-                    vertical: verticalPadding / 2,
-                  ),
-                ),
-                value: _selectedUserEmail,
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 14 : 16,
-                  color: Colors.grey[800],
-                ),
-                items: _users.map((user) {
-                  final organizationName = user['organizations']?['name'] ?? 'No Organization';
-                  return DropdownMenuItem<String>(
-                    value: user['email'],
-                    child: Container(
-                      constraints: BoxConstraints(
-                        maxWidth: screenSize.width - (horizontalPadding * 4),
-                      ),
-                      child: Text(
-                        '${user['email']} (${user['role']}) - $organizationName',
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 12 : 14,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedUserEmail = value;
-                  });
-                },
-              ),
-            ),
-
-            SizedBox(height: verticalPadding),
-
-            // Organization Selection
-            Text(
-              'Select Organization',
-              style: TextStyle(
-                fontSize: isSmallScreen ? 14 : 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[700],
-              ),
-            ),
-            SizedBox(height: verticalPadding / 2),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey[300]!),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: DropdownButtonFormField<String>(
-                decoration: InputDecoration(
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: horizontalPadding / 2,
-                    vertical: verticalPadding / 2,
-                  ),
-                ),
-                value: _selectedOrganizationId,
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 14 : 16,
-                  color: Colors.grey[800],
-                ),
-                items: _organizations.map((org) {
-                  return DropdownMenuItem<String>(
-                    value: org['id'],
-                    child: Container(
-                      constraints: BoxConstraints(
-                        maxWidth: screenSize.width - (horizontalPadding * 4),
-                      ),
-                      child: Text(
-                        '${org['name']} - ${org['description']}',
-                        style: TextStyle(
-                          fontSize: isSmallScreen ? 12 : 14,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  );
-                }).toList(),
-                onChanged: (value) {
-                  setState(() {
-                    _selectedOrganizationId = value;
-                  });
-                },
-              ),
-            ),
-
-            SizedBox(height: verticalPadding * 1.5),
-
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: OutlinedButton.styleFrom(
-                      padding: EdgeInsets.symmetric(vertical: verticalPadding / 2),
-                      side: BorderSide(color: Colors.grey[300]!),
-                    ),
-                    child: Text(
-                      'Cancel',
-                      style: TextStyle(
-                        fontSize: isSmallScreen ? 14 : 16,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                  ),
-                ),
-                SizedBox(width: horizontalPadding / 2),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _assignUserToOrganization();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).primaryColor,
-                      foregroundColor: Colors.white,
-                      padding: EdgeInsets.symmetric(vertical: verticalPadding / 2),
-                    ),
-                    child: Text(
-                      'Assign',
-                      style: TextStyle(
-                        fontSize: isSmallScreen ? 14 : 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            SizedBox(height: viewPadding.bottom),
           ],
         ),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: FutureBuilder<List<Map<String, dynamic>>>(
+            future: _supabaseService.getUsersByOrganization(organizationId),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return SizedBox(
+                  height: 200,
+                  child: const Center(
+                    child: CircularProgressIndicator(),
+                  ),
+                );
+              }
+
+              if (snapshot.hasError) {
+                return SizedBox(
+                  height: 200,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: Colors.red,
+                          size: isSmallScreen ? 32 : 40,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Error loading users',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontSize: isSmallScreen ? 14 : 16,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          '${snapshot.error}',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: isSmallScreen ? 12 : 14,
+                          ),
+                          textAlign: TextAlign.center,
+                          maxLines: 3,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              final users = snapshot.data ?? [];
+
+              if (users.isEmpty) {
+                return SizedBox(
+                  height: 200,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.people_outline,
+                          color: Colors.grey[400],
+                          size: isSmallScreen ? 48 : 64,
+                        ),
+                        SizedBox(height: 16),
+                        Text(
+                          'No users assigned',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: isSmallScreen ? 16 : 18,
+                            fontWeight: FontWeight.w500,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'This organization has no assigned users yet',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: isSmallScreen ? 12 : 14,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              // Calculate dynamic height based on number of users
+              final itemHeight = isSmallScreen ? 85.0 : 95.0; // Increased for subtitle layout
+              final maxHeight = screenSize.height * 0.7;
+              final calculatedHeight = (users.length * itemHeight) + 32; // 32 for padding
+              final dialogHeight = calculatedHeight > maxHeight ? maxHeight : calculatedHeight;
+
+              return SizedBox(
+                height: dialogHeight,
+                child: ListView.builder(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  itemCount: users.length,
+                  itemBuilder: (context, index) {
+                    final user = users[index];
+                    final email = user['email'] ?? 'No Email';
+                    final role = user['role'] ?? 'user';
+                    final roleText = role == 'admin' ? 'Administrator' : 'User';
+
+                    return Container(
+                      margin: EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[200]!),
+                      ),
+                      child: ListTile(
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: isSmallScreen ? 12 : 16,
+                          vertical: isSmallScreen ? 12 : 16,
+                        ),
+                        title: Text(
+                          email,
+                          style: TextStyle(
+                            fontSize: isSmallScreen ? 12 : 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[800],
+                          ),
+                          maxLines: 4,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Container(
+                          margin: EdgeInsets.only(top: 4),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: roleText.length > 4 ? 10 : 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: role == 'admin' ? Colors.blue[100] : Colors.green[100],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            roleText,
+                            style: TextStyle(
+                              fontSize: isSmallScreen ? 10 : 12,
+                              fontWeight: FontWeight.w500,
+                              color: role == 'admin' ? Colors.blue[800] : Colors.green[800],
+                            ),
+                          ),
+                        ),
+                        trailing: IconButton(
+                          icon: Icon(
+                            Icons.remove_circle_outline,
+                            color: Colors.red[400],
+                            size: isSmallScreen ? 20 : 24,
+                          ),
+                          onPressed: () => _showRemoveUserDialog(email, organizationName, organizationId),
+                          tooltip: 'Remove user from organization',
+                          padding: EdgeInsets.zero,
+                          constraints: BoxConstraints(),
+                        ),
+                        isThreeLine: false,
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.symmetric(
+                horizontal: isSmallScreen ? 16 : 20,
+                vertical: isSmallScreen ? 8 : 12,
+              ),
+            ),
+            child: Text(
+              'Close',
+              style: TextStyle(
+                fontSize: isSmallScreen ? 14 : 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  void _showRemoveUserDialog(String userEmail, String organizationName, String organizationId) {
+    final mediaQuery = MediaQuery.of(context);
+    final screenSize = mediaQuery.size;
+    final isSmallScreen = screenSize.width < 360;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          'Remove User',
+          style: TextStyle(
+            fontSize: isSmallScreen ? 16 : 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          'Are you sure you want to remove "$userEmail" from "$organizationName"? '
+          'This will:\n\n'
+          '• Remove the user from this organization\n'
+          '• Clear organization_id from all their content\n'
+          '• The user can still access the app but won\'t be part of this organization\n\n'
+          'This action cannot be undone!',
+          style: TextStyle(
+            fontSize: isSmallScreen ? 12 : 14,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(
+                fontSize: isSmallScreen ? 14 : 16,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop(); // Close confirmation dialog
+              Navigator.of(context).pop(); // Close users dialog
+              _removeUserFromOrganization(userEmail, organizationName);
+            },
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: Text(
+              'REMOVE',
+              style: TextStyle(
+                fontSize: isSmallScreen ? 14 : 16,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _removeUserFromOrganization(String userEmail, String organizationName) async {
+    try {
+      await _supabaseService.removeUserFromOrganization(userEmail);
+
+      // Refresh the data to show updated state
+      await _loadData();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('User "$userEmail" removed from "$organizationName" successfully!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error removing user: ${e.toString()}')),
+        );
+      }
+    }
   }
 }
