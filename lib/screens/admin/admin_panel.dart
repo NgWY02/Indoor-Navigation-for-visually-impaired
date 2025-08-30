@@ -122,7 +122,11 @@ class _AdminPanelState extends State<AdminPanel> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 16),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
                     Expanded(
                       child: ElevatedButton.icon(
                         onPressed: () => Navigator.pushNamed(context, '/image_test'),
@@ -133,6 +137,8 @@ class _AdminPanelState extends State<AdminPanel> {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 16),
+                    const Expanded(child: SizedBox()), // Empty space for future buttons
                   ],
                 ),
               ],

@@ -268,11 +268,11 @@ class ContinuousPathRecorder {
   }
 
   Future<void> _captureWaypoint({String? manualDescription}) async {
-    // 🚨 DOUBLE-CHECK: Ensure we're still recording before any processing
+    // DOUBLE-CHECK: Ensure we're still recording before any processing
     if (!_isRecording || _currentHeading == null) return;
 
     try {
-      // 🚨 ADDITIONAL CHECK: Verify recording state hasn't changed during execution
+      // ADDITIONAL CHECK: Verify recording state hasn't changed during execution
       if (!_isRecording) {
         print('⚠️ Recording stopped during waypoint capture - aborting');
         return;
@@ -326,7 +326,7 @@ class ContinuousPathRecorder {
           if (stepsSinceLastWaypoint > 0) {
             // Real step-based distance calculation
             distanceFromPrevious = stepsSinceLastWaypoint * _averageStrideLength;
-            print('📏 REAL distance: ${stepsSinceLastWaypoint} steps = ${distanceFromPrevious.toStringAsFixed(1)}m');
+            print('REAL distance: ${stepsSinceLastWaypoint} steps = ${distanceFromPrevious.toStringAsFixed(1)}m');
             
             // Update baseline for next waypoint
             _stepsAtLastWaypoint = _currentTotalSteps;
@@ -338,7 +338,7 @@ class ContinuousPathRecorder {
         } else {
           // Step counter not ready yet - use time-based fallback
           distanceFromPrevious = _captureInterval.inSeconds * 1.2;
-          print('⚠️ Step counter not ready, using time-based estimation: ${distanceFromPrevious.toStringAsFixed(1)}m');
+          print('Step counter not ready, using time-based estimation: ${distanceFromPrevious.toStringAsFixed(1)}m');
         }
       }
 

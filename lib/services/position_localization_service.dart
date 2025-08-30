@@ -24,6 +24,7 @@ class LocationMatch {
 class PositionLocalizationService {
   final ClipService _clipService;
   final SupabaseService _supabaseService;
+  final Function(String debugInfo)? onDebugUpdate;
   
   // Configuration
   static const double _minimumConfidenceThreshold = 0.6;
@@ -38,6 +39,7 @@ class PositionLocalizationService {
   PositionLocalizationService({
     required ClipService clipService,
     required SupabaseService supabaseService,
+    this.onDebugUpdate,
   }) : _clipService = clipService, _supabaseService = supabaseService;
 
   /// Start continuous sampling for position localization
@@ -122,17 +124,39 @@ class PositionLocalizationService {
   /// Get available routes from a specific location
   Future<List<NavigationRoute>> getAvailableRoutes(String fromNodeId) async {
     try {
+      print('=== getAvailableRoutes() called ===');
+      print('Looking for routes from node: $fromNodeId');
+
+      // Get user profile to check organization
+      final userProfile = await _supabaseService.getCurrentUserProfile();
+      final userOrganizationId = userProfile?['organization_id'];
+      print('👤 User organization ID: $userOrganizationId');
+
+      if (userOrganizationId == null) {
+        print('⚠️ WARNING: User has no organization assigned!');
+        print('⚠️ This means they can only see paths they created themselves');
+      }
+
       // Get all navigation paths that start from this node
       final paths = await _supabaseService.loadAllPaths();
-      
+      print('Found ${paths.length} total paths');
+
       final availableRoutes = <NavigationRoute>[];
-      
+
       for (final path in paths) {
+        print('Checking path: ${path.name} (ID: ${path.id})');
+        print('  Start: ${path.startLocationId}, End: ${path.endLocationId}');
+        print('  Current node: $fromNodeId');
+
         if (path.startLocationId == fromNodeId) {
+          print('  ✅ Match found! Getting destination details...');
+
           // Get destination node details
           final destinationNode = await _getNodeDetails(path.endLocationId);
-          
+
           if (destinationNode != null) {
+            print('  ✅ Destination node found: ${destinationNode['name']}');
+
             availableRoutes.add(NavigationRoute(
               pathId: path.id,
               pathName: path.name,
@@ -145,10 +169,17 @@ class PositionLocalizationService {
               estimatedDuration: _estimateDuration(path.estimatedDistance),
               waypoints: path.waypoints,
             ));
+
+            print('  ✅ Route added: ${path.name}');
+          } else {
+            print('  ❌ Destination node not found');
           }
+        } else {
+          print('  ❌ No match for start node');
         }
       }
-      
+
+      print('Total available routes: ${availableRoutes.length}');
       return availableRoutes;
     } catch (e) {
       print('Error getting available routes: $e');
@@ -215,21 +246,128 @@ class PositionLocalizationService {
   }
   
   Future<List<Map<String, dynamic>>> _getAllNodesWithEmbeddings() async {
-    // Query all nodes that have associated embeddings
-    return await _supabaseService.client
-        .from('map_nodes')
-        .select('id, name, map_id')
-        .not('id', 'in', '()'); // Get all nodes
+    try {
+      // Get current user and their organization
+      final userId = _supabaseService.currentUser?.id;
+      if (userId == null) {
+        print('❌ No user logged in for nodes query');
+        return [];
+      }
+
+      // Get user's organization
+      final userProfile = await _supabaseService.client
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', userId)
+          .maybeSingle();
+
+      final userOrganizationId = userProfile?['organization_id'];
+      print('👤 User organization ID for nodes: $userOrganizationId');
+
+      // Query nodes that have embeddings accessible to the user
+      final embeddingsQuery = _supabaseService.client
+          .from('place_embeddings')
+          .select('node_id');
+
+      final isAdminUser = await _supabaseService.isAdmin();
+
+      if (isAdminUser) {
+        // Admin users can see ALL content from their organization (including other admins' content)
+        if (userOrganizationId != null) {
+          embeddingsQuery.or('organization_id.eq.$userOrganizationId,organization_id.is.null');
+          print('🔍 Admin user - filtering nodes by organization: $userOrganizationId (including null org for compatibility)');
+        } else {
+          // Admin with no organization can only see their own content
+          embeddingsQuery.eq('user_id', userId);
+          print('⚠️ Admin user (no organization) - filtering nodes by user: $userId');
+        }
+      } else {
+        // Regular users can see content from their organization OR null organization_id (backward compatibility)
+        if (userOrganizationId != null) {
+          embeddingsQuery.or('organization_id.eq.$userOrganizationId,organization_id.is.null');
+          print('🔍 Regular user - filtering nodes by organization: $userOrganizationId (including null org for compatibility)');
+        } else {
+          // Users without organization can only see their own content
+          embeddingsQuery.eq('user_id', userId);
+          print('⚠️ Regular user (no organization) - filtering nodes by user: $userId');
+        }
+      }
+
+      final embeddingsResponse = await embeddingsQuery;
+      final nodeIds = (embeddingsResponse as List)
+          .map((item) => item['node_id'] as String)
+          .toSet() // Remove duplicates
+          .toList();
+
+      if (nodeIds.isEmpty) {
+        print('📊 No nodes with accessible embeddings found');
+        return [];
+      }
+
+      // Get node details for these node IDs
+      final nodesResponse = await _supabaseService.client
+          .from('map_nodes')
+          .select('id, name, map_id')
+          .inFilter('id', nodeIds);
+
+      print('📊 Found ${nodesResponse.length} nodes with accessible embeddings');
+      return List<Map<String, dynamic>>.from(nodesResponse);
+    } catch (e) {
+      print('❌ Error getting nodes with embeddings: $e');
+      return [];
+    }
   }
   
   Future<List<List<double>>> _getNodeEmbeddings(String nodeId) async {
     try {
-      // Get embeddings associated with this node from place_embeddings table
-      final response = await _supabaseService.client
+      // Get current user and their organization
+      final userId = _supabaseService.currentUser?.id;
+      if (userId == null) {
+        print('❌ No user logged in for embedding query');
+        return [];
+      }
+
+      // Get user's organization
+      final userProfile = await _supabaseService.client
+          .from('profiles')
+          .select('organization_id')
+          .eq('id', userId)
+          .maybeSingle();
+
+      final userOrganizationId = userProfile?['organization_id'];
+      print('👤 User organization ID for embeddings: $userOrganizationId');
+
+      // Query embeddings with organization filtering
+      final query = _supabaseService.client
           .from('place_embeddings')
           .select('embedding')
           .eq('node_id', nodeId);
-      
+
+      final isAdminUser = await _supabaseService.isAdmin();
+
+      final response;
+      if (isAdminUser) {
+        // Admin users can see ALL content from their organization (including other admins' content)
+        if (userOrganizationId != null) {
+          response = await query.or('organization_id.eq.$userOrganizationId,organization_id.is.null');
+          print('🔍 Admin user - filtering embeddings by organization: $userOrganizationId (including null org for compatibility)');
+        } else {
+          // Admin with no organization can only see their own content
+          response = await query.eq('user_id', userId);
+          print('⚠️ Admin user (no organization) - filtering embeddings by user: $userId');
+        }
+      } else {
+        // Regular users can see content from their organization OR null organization_id (backward compatibility)
+        if (userOrganizationId != null) {
+          response = await query.or('organization_id.eq.$userOrganizationId,organization_id.is.null');
+          print('🔍 Regular user - filtering embeddings by organization: $userOrganizationId (including null org for compatibility)');
+        } else {
+          // Users without organization can only see their own content
+          response = await query.eq('user_id', userId);
+          print('⚠️ Regular user (no organization) - filtering embeddings by user: $userId');
+        }
+      }
+
       final embeddings = <List<double>>[];
       for (final item in response as List) {
         final embeddingStr = item['embedding'] as String;
@@ -239,10 +377,11 @@ class PositionLocalizationService {
           embeddings.add(embedding);
         }
       }
-      
+
+      print('📊 Found ${embeddings.length} embeddings for node $nodeId');
       return embeddings;
     } catch (e) {
-      print('Error getting node embeddings: $e');
+      print('❌ Error getting node embeddings: $e');
       return [];
     }
   }

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
-import '../screens/../admin/map_management.dart';
-import '../admin/group_management_screen.dart';
+import '../admin/user_management_screen.dart';
 
 
 class ProfileScreen extends StatefulWidget {
@@ -33,12 +32,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final user = _supabaseService.currentUser;
       if (user != null) {
         final isAdmin = await _supabaseService.isAdmin();
+        // final profile = await _supabaseService.getCurrentUserProfile(); // Removed for simplified single-user experience
         
         setState(() {
           _userEmail = user.email ?? 'No email available';
           _isAdmin = isAdmin;
           _isLoading = false;
         });
+        
+        // User invite code functionality removed for simplified single-user experience
       } else {
         // User is not logged in, navigate back to home (AuthWrapper will handle login)
         Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
@@ -63,19 +65,173 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  void _navigateToUserManagement() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const UserManagementScreen(),
+      ),
+    );
+  }
+
+  /*
+  void _showQuickInviteDialog(BuildContext context) {
+    final TextEditingController userCodeController = TextEditingController();
+    String? selectedGroupId;
+    List<Map<String, dynamic>> myGroups = [];
+    bool isLoading = true;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          if (isLoading) {
+            // Load groups when dialog opens
+            _supabaseService.getGroupsICreated().then((groups) {
+              setDialogState(() {
+                myGroups = groups;
+                isLoading = false;
+                if (groups.isNotEmpty) {
+                  selectedGroupId = groups.first['id'];
+                }
+              });
+            }).catchError((error) {
+              setDialogState(() {
+                isLoading = false;
+              });
+              print('Error loading groups: $error');
+            });
+          }
+
+          return AlertDialog(
+            title: const Text('Quick Invite User'),
+            content: SizedBox(
+              width: 300,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Enter user code to invite:'),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: userCodeController,
+                    decoration: const InputDecoration(
+                      hintText: 'e.g. ABC123',
+                      border: OutlineInputBorder(),
+                    ),
+                    textCapitalization: TextCapitalization.characters,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text('Select group:'),
+                  const SizedBox(height: 8),
+                  if (isLoading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (myGroups.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: const Text(
+                        'No groups found. Create a group first in Group Management.',
+                        style: TextStyle(color: Colors.orange),
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      value: selectedGroupId,
+                      decoration: const InputDecoration(
+                        border: OutlineInputBorder(),
+                      ),
+                      items: myGroups.map((group) {
+                        return DropdownMenuItem<String>(
+                          value: group['id'],
+                          child: Text(group['name'] ?? 'Unnamed Group'),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedGroupId = value;
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: (myGroups.isEmpty || userCodeController.text.isEmpty)
+                    ? null
+                    : () => _inviteUser(context, userCodeController.text.trim(), selectedGroupId!),
+                child: const Text('Invite'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _inviteUser(BuildContext context, String userCode, String groupId) async {
+    Navigator.of(context).pop(); // Close dialog first
+
+    try {
+      await _supabaseService.addUserToGroupByCode(
+        groupId: groupId,
+        userCode: userCode.toUpperCase(),
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('User $userCode successfully invited to group!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      String message = 'Failed to invite user';
+      if (e.toString().contains('User code not found')) {
+        message = 'User code "$userCode" not found. Please check and try again.';
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+  */
+
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
-    // Phone-focused spacing and safe-area handling
-    const double horizontalPadding = 16.0;
-    const double verticalPadding = 16.0;
-    final bottomSafeArea = mediaQuery.padding.bottom;
-    final hasBottomNavigation = bottomSafeArea > 0;
+    final screenWidth = mediaQuery.size.width;
+    final bottomPadding = mediaQuery.padding.bottom;
+    
+    // Responsive values based on screen size
+    final isSmallPhone = screenWidth < 360;
+    final isLargePhone = screenWidth > 414;
+    
+    final horizontalPadding = isSmallPhone ? 16.0 : (isLargePhone ? 24.0 : 20.0);
+    final cardPadding = isSmallPhone ? 16.0 : (isLargePhone ? 24.0 : 20.0);
+    final avatarSize = isSmallPhone ? 70.0 : (isLargePhone ? 90.0 : 80.0);
+    final titleFontSize = isSmallPhone ? 16.0 : (isLargePhone ? 20.0 : 18.0);
+    final subtitleFontSize = isSmallPhone ? 13.0 : (isLargePhone ? 15.0 : 14.0);
 
     if (_isLoading) {
       return Scaffold(
+        backgroundColor: Colors.grey.shade50,
         appBar: AppBar(
           title: const Text('Profile'),
+          backgroundColor: Colors.blue.shade700,
+          elevation: 0,
+          foregroundColor: Colors.white,
         ),
         body: const Center(
           child: CircularProgressIndicator(),
@@ -84,298 +240,346 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
 
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: const Text('Profile'),
+        backgroundColor: Colors.blue.shade700,
+        elevation: 0,
+        foregroundColor: Colors.white,
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-        child: Padding(
-            padding: EdgeInsets.only(
-              left: horizontalPadding,
-              right: horizontalPadding,
-              top: verticalPadding,
-              bottom: hasBottomNavigation ? verticalPadding + 16 : verticalPadding,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: double.infinity,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                horizontalPadding,
+                horizontalPadding,
+                horizontalPadding + bottomPadding + 16, // Extra padding for bottom nav
               ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-                  _buildProfileHeader(context),
-                  const SizedBox(height: 16),
-                  if (_isAdmin) _buildAdminQuickActions(context),
-                  if (_isAdmin) const SizedBox(height: 16),
-                  _buildAccountSection(context),
-                  const SizedBox(height: 24),
-                  Center(
-                    child: Text(
-                      'Indoor Navigation for Visually Impaired',
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - (horizontalPadding * 2) - bottomPadding - 16,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _buildProfileCard(context, avatarSize, cardPadding, titleFontSize),
+                    SizedBox(height: isSmallPhone ? 20 : 24),
+                    if (_isAdmin) ...[
+                      _buildSectionTitle('Admin Actions', isSmallPhone),
+                      SizedBox(height: isSmallPhone ? 8 : 12),
+                      _buildAdminActions(context, cardPadding, titleFontSize, subtitleFontSize),
+                      SizedBox(height: isSmallPhone ? 20 : 24),
+                    ],
+                    _buildSectionTitle('Account', isSmallPhone),
+                    SizedBox(height: isSmallPhone ? 8 : 12),
+                    _buildAccountActions(context, cardPadding, titleFontSize, subtitleFontSize),
+                    SizedBox(height: isSmallPhone ? 32 : 40),
+                    _buildAppInfo(isSmallPhone),
+                  ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _buildProfileHeader(BuildContext context) {
+  Widget _buildProfileCard(BuildContext context, double avatarSize, double cardPadding, double titleFontSize) {
     final String avatarText = _userEmail.isNotEmpty ? _userEmail[0].toUpperCase() : '?';
+    
     return Container(
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            Theme.of(context).colorScheme.primary.withOpacity(0.9),
-            Theme.of(context).colorScheme.primary.withOpacity(0.7),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(16),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.all(16),
-      child: Row(
+      padding: EdgeInsets.all(cardPadding),
+      child: Column(
         children: [
-          CircleAvatar(
-            radius: 28,
-            backgroundColor: Colors.white,
-            child: Text(
-              avatarText,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Theme.of(context).colorScheme.primary,
+          Container(
+            width: avatarSize,
+            height: avatarSize,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.blue.shade400,
+                  Colors.purple.shade400,
+                ],
+              ),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                avatarText,
+                style: TextStyle(
+                  fontSize: avatarSize * 0.4,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+          const SizedBox(height: 16),
+          Text(
+            _userEmail,
+            style: TextStyle(
+              fontSize: titleFontSize,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: _isAdmin ? Colors.amber.shade100 : Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: _isAdmin ? Colors.amber.shade200 : Colors.blue.shade200,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _isAdmin ? Icons.admin_panel_settings : Icons.person,
+                  size: 16,
+                  color: _isAdmin ? Colors.amber.shade700 : Colors.blue.shade700,
+                ),
+                const SizedBox(width: 6),
                 Text(
-                  _userEmail,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
+                  _isAdmin ? 'Administrator' : 'User',
+                  style: TextStyle(
+                    fontSize: 12,
                     fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                const SizedBox(height: 6),
-                      Row(
-                        children: [
-                    Icon(
-                      _isAdmin ? Icons.verified : Icons.person,
-                      color: Colors.white,
-                      size: 16,
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(100),
-                        border: Border.all(color: Colors.white.withOpacity(0.4)),
-                      ),
-                      child: Text(
-                            _isAdmin ? 'Administrator' : 'User',
-                            style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
+                    color: _isAdmin ? Colors.amber.shade700 : Colors.blue.shade700,
                   ),
                 ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          // User Code Section - Removed for simplified single-user experience
         ],
       ),
     );
   }
 
-  Widget _buildAdminQuickActions(BuildContext context) {
-    const int columns = 2;
-    const double spacing = 12;
+  Widget _buildSectionTitle(String title, bool isSmallPhone) {
+    return Text(
+      title,
+      style: TextStyle(
+        fontSize: isSmallPhone ? 18 : 20,
+        fontWeight: FontWeight.bold,
+        color: Colors.black87,
+      ),
+    );
+  }
+
+  Widget _buildAdminActions(BuildContext context, double cardPadding, double titleFontSize, double subtitleFontSize) {
     return Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
-          child: Text(
-            'Admin Quick Actions',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          ),
+      children: [
+        // Quick Invite removed for simplified single-user experience
+        /*
+        _buildActionTile(
+          icon: Icons.person_add,
+          title: 'Quick Invite',
+          subtitle: 'Add user to group by user code',
+          color: Colors.green.shade600,
+          onTap: () => _showQuickInviteDialog(context),
+          cardPadding: cardPadding,
+          titleFontSize: titleFontSize,
+          subtitleFontSize: subtitleFontSize,
         ),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final double cardWidth = (constraints.maxWidth - (spacing * (columns - 1))) / columns;
-            return Wrap(
-              spacing: spacing,
-              runSpacing: spacing,
-              children: [
-                SizedBox(
-                  width: cardWidth,
-                  child: _buildActionCard(
-                    context: context,
-                    color: Colors.indigo,
-                    icon: Icons.admin_panel_settings,
-                    title: 'Admin Panel',
-                    subtitle: 'Manage users and settings',
-                    onTap: () => Navigator.of(context).pushNamed('/admin'),
-                  ),
-                ),
-                SizedBox(
-                  width: cardWidth,
-                  child: _buildActionCard(
-                    context: context,
-                    color: Colors.teal,
-                    icon: Icons.map,
-                    title: 'Manage Maps',
-                    subtitle: 'Upload and edit maps',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const MapManagement()),
-                    ),
-                  ),
-                ),
-                SizedBox(
-                  width: cardWidth,
-                  child: _buildActionCard(
-                    context: context,
-                    color: Colors.deepPurple,
-                    icon: Icons.group,
-                    title: 'Manage Groups',
-                    subtitle: 'Create groups and codes',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const GroupManagementScreen()),
-                    ),
-                  ),
-                ),
-              ],
-            );
-          },
+        SizedBox(height: cardPadding * 0.6),
+        */
+        _buildActionTile(
+          icon: Icons.people,
+          title: 'User Management',
+          subtitle: 'Manage user organization assignments',
+          color: Colors.blue.shade600,
+          onTap: _navigateToUserManagement,
+          cardPadding: cardPadding,
+          titleFontSize: titleFontSize,
+          subtitleFontSize: subtitleFontSize,
+        ),
+        SizedBox(height: cardPadding * 0.6),
+        _buildActionTile(
+          icon: Icons.image_search,
+          title: 'Image Test',
+          subtitle: 'Test image recognition system',
+          color: Colors.orange.shade600,
+          onTap: () => Navigator.of(context).pushNamed('/image_test'),
+          isTemporary: true,
+          cardPadding: cardPadding,
+          titleFontSize: titleFontSize,
+          subtitleFontSize: subtitleFontSize,
         ),
       ],
     );
   }
 
-  Widget _buildActionCard({
-    required BuildContext context,
-    required Color color,
+  Widget _buildAccountActions(BuildContext context, double cardPadding, double titleFontSize, double subtitleFontSize) {
+    return _buildActionTile(
+      icon: Icons.logout,
+      title: 'Sign Out',
+      subtitle: 'Sign out of your account',
+      color: Colors.red.shade600,
+      onTap: _signOut,
+      cardPadding: cardPadding,
+      titleFontSize: titleFontSize,
+      subtitleFontSize: subtitleFontSize,
+    );
+  }
+
+  Widget _buildActionTile({
     required IconData icon,
     required String title,
     required String subtitle,
+    required Color color,
     required VoidCallback onTap,
+    required double cardPadding,
+    required double titleFontSize,
+    required double subtitleFontSize,
+    bool isTemporary = false,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Ink(
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.2)),
-        ),
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 22),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: color.darken(),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.black38, size: 22),
-          ],
-        ),
+    final iconSize = cardPadding > 20 ? 50.0 : 45.0;
+    final iconPadding = cardPadding > 20 ? 20.0 : 16.0;
+    
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-    );
-  }
-
-  Widget _buildAccountSection(BuildContext context) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-      ),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: EdgeInsets.all(iconPadding),
+            child: Row(
+              children: [
+                Container(
+                  width: iconSize,
+                  height: iconSize,
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    icon,
+                    color: color,
+                    size: iconSize * 0.48,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-            Text(
-              'Account',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(
-              onPressed: _signOut,
-              icon: const Icon(Icons.logout, size: 20),
-              label: const Text('Sign Out', style: TextStyle(fontSize: 14)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: titleFontSize,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.black87,
+                              ),
+                            ),
+                          ),
+                          if (isTemporary) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'TEMP',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.orange.shade700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: subtitleFontSize,
+                          color: Colors.grey.shade600,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.grey.shade400,
+                  size: 16,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
-} 
 
-// Lightweight color util for slightly darker text color based on a base color
-extension _ProfileColorUtils on Color {
-  Color darken([double amount = .2]) {
-    assert(amount >= 0 && amount <= 1);
-    final hsl = HSLColor.fromColor(this);
-    final hslDark = hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0));
-    return hslDark.toColor();
+  Widget _buildAppInfo(bool isSmallPhone) {
+    return Center(
+      child: Column(
+        children: [
+          Text(
+            'Indoor Navigation for Visually Impaired',
+            style: TextStyle(
+              color: Colors.grey.shade500,
+              fontSize: isSmallPhone ? 11 : 12,
+              fontWeight: FontWeight.w500,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Version 1.0.0',
+            style: TextStyle(
+              color: Colors.grey.shade400,
+              fontSize: isSmallPhone ? 9 : 10,
+            ),
+          ),
+        ],
+      ),
+    );
   }
-} 
+}

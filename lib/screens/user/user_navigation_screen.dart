@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'navigation_main_screen.dart';
+import 'user_home_screen.dart';
 
 class UserNavigationScreen extends StatelessWidget {
   final List<CameraDescription> cameras;
@@ -9,9 +9,7 @@ class UserNavigationScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // For visually impaired users, go directly to the comprehensive navigation screen
-    return NavigationMainScreen(
-      camera: cameras.first,
-    );
+    // Show user home screen with navigation and profile options
+    return UserHomeScreen(cameras: cameras);
   }
 } 

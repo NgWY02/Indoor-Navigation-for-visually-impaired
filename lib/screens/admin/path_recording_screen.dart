@@ -305,9 +305,52 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
         endLocationId: widget.endLocationId,
       );
 
-      // Save to Supabase
+      // Save to Supabase with enhanced error handling
       final supabaseService = SupabaseService();
-      await supabaseService.savePath(path);
+
+      try {
+        await supabaseService.savePath(path);
+      } catch (saveError) {
+        print('❌ Save path error: $saveError');
+
+        // Check if it's an RLS policy violation
+        if (saveError.toString().contains('violates row-level security policy') ||
+            saveError.toString().contains('Authentication error')) {
+
+          // Try to refresh the session
+          setState(() {
+            _statusMessage = "Authentication issue detected. Refreshing session...";
+          });
+
+          final sessionRefreshed = await supabaseService.refreshSession();
+
+          if (sessionRefreshed) {
+            // Try saving again after session refresh
+            setState(() {
+              _statusMessage = "Session refreshed. Retrying save...";
+            });
+
+            try {
+              await supabaseService.savePath(path);
+            } catch (retryError) {
+              setState(() {
+                _statusMessage = "Failed to save path after session refresh. Please sign out and sign in again.";
+              });
+              _speak("Failed to save path. Please sign out and sign in again.");
+              return;
+            }
+          } else {
+            setState(() {
+              _statusMessage = "Session refresh failed. Please sign out and sign in again.";
+            });
+            _speak("Authentication failed. Please sign out and sign in again.");
+            return;
+          }
+        } else {
+          // Re-throw other errors
+          rethrow;
+        }
+      }
 
       setState(() {
         _statusMessage = "Path saved successfully!";

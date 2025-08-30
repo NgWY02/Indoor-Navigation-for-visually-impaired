@@ -59,10 +59,44 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     super.dispose();
   }
 
-  // Override debug mixin method to test step counter
+  // Override debug mixin method to test authentication status
   @override
-  void testStepCounter() {
-    _navigationService.testStepCounter();
+  void testStepCounter() async {
+    // Test authentication status - method removed
+    updateDebugInfo('🔐 AUTHENTICATION STATUS: Method removed');
+  }
+
+  @override
+  void testPathCreation() async {
+    try {
+      updateDebugInfo('🧪 Starting path creation and loading test...');
+      await _supabaseService.testPathCreationAndLoading();
+      updateDebugInfo('✅ Path creation test completed - check console logs');
+    } catch (e) {
+      updateDebugInfo('❌ Path creation test failed: $e');
+    }
+  }
+
+  @override
+  void debugDatabaseContents() async {
+    try {
+      updateDebugInfo('🔍 Starting database debug check...');
+      await _supabaseService.debugCheckExistingPaths();
+      updateDebugInfo('✅ Database debug completed - check console logs');
+    } catch (e) {
+      updateDebugInfo('❌ Database debug failed: $e');
+    }
+  }
+
+  @override
+  void runDatabaseMigration() async {
+    try {
+      updateDebugInfo('🔧 Starting organization migration...');
+      final result = await _supabaseService.runOrganizationMigration();
+      updateDebugInfo('✅ Organization migration completed!\n${result.toString()}');
+    } catch (e) {
+      updateDebugInfo('❌ Migration failed: $e');
+    }
   }
 
   @override
@@ -86,6 +120,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       _localizationService = PositionLocalizationService(
         clipService: _clipService,
         supabaseService: _supabaseService,
+        onDebugUpdate: updateDebugInfo, // 🐛 Add debug callback for location identification
       );
       _navigationService = nav_service.RealTimeNavigationService(
         clipService: _clipService,
@@ -113,14 +148,14 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     try {
       // Dispose existing controller if it exists and is disposed
       await _disposeCamera();
-      
+
       // Request permissions including step counter
       final permissions = await [
         Permission.camera,
         Permission.activityRecognition, // For step counter
         Permission.sensors, // For step counter and compass
       ].request();
-      
+
       if (permissions[Permission.camera] != PermissionStatus.granted) {
         throw Exception('Camera permission denied');
       }
@@ -149,6 +184,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       if (mounted) {
         setState(() {
           _isCameraInitialized = false;
+          _statusMessage = 'Camera initialization failed: ${e.toString()}';
         });
       }
       _onError('Failed to initialize camera: $e');
