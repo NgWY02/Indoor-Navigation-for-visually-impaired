@@ -147,7 +147,7 @@ class SupabaseService {
     try {
       final profileData = await client
           .from('profiles')
-          .select('id, name, role, organization_id, created_at')
+          .select('id, role, organization_id, created_at')
           .eq('id', user.id)
           .maybeSingle();
 
@@ -161,7 +161,6 @@ class SupabaseService {
       return {
         'id': user.id,
         'email': user.email,
-        'name': null,
         'role': 'user',
         'organization_id': null,
       };
@@ -195,40 +194,15 @@ class SupabaseService {
     required UserRole role,
     Map<String, dynamic>? data,
   }) async {
-    final authResponse = await signUp(
+    return await signUp(
       email: email,
       password: password,
       role: role,
       data: data,
     );
-
-    // Extract the isNewUser information from the logs or re-check
-    bool isNewUser = false;
-    if (authResponse.user != null) {
-      try {
-        final existingRole = await client
-            .from('profiles')
-            .select('id')
-            .eq('id', authResponse.user!.id)
-            .maybeSingle();
-
-        // FIXED LOGIC: If NOT found in profiles, it's a new user
-        // If found in profiles, it's an existing user
-        isNewUser = existingRole == null; // If NOT found, it's new
-
-        print(
-            'User check: existingRole = ${existingRole != null ? "found" : "not found"}, isNewUser = $isNewUser');
-      } catch (e) {
-        print('Error re-checking profiles for isNewUser: $e');
-        // Fallback: if we can't check and session is null, assume new user
-        isNewUser = authResponse.session == null;
-      }
-    }
-
-    return SignUpResult(authResponse: authResponse, isNewUser: isNewUser);
   }
 
-  Future<AuthResponse> signUp({
+  Future<SignUpResult> signUp({
     required String email,
     required String password,
     required UserRole role,
@@ -259,88 +233,58 @@ class SupabaseService {
       print(
           '  - Session: ${response.session?.accessToken != null ? "exists" : "null"}');
 
-      // Key insight: Check if this user already exists in our profiles table
-      // If they don't exist in profiles but have a user object, they might be:
-      // 1. A completely new user (should be added to profiles)
-      // 2. An existing user who was created outside our app
+      // Determine if this is a new user
+      // For new signups, session is typically null until email confirmation
+      isNewUser = response.session == null;
 
-      if (response.user != null) {
+      if (response.user != null && isNewUser) {
+        print('New user signup detected - inserting into profiles table.');
         try {
-          // Check if user already exists in our profiles table
-          final existingUser = await client
-              .from('profiles')
-              .select('id')
-              .eq('id', response.user!.id)
-              .maybeSingle();
+          final String userRoleString = role == UserRole.admin ? 'admin' : 'user';
+          final String currentTime = DateTime.now().toIso8601String();
 
-          if (existingUser != null) {
-            // User already exists in our system
-            print('User already exists in profiles table');
-            isNewUser = false;
-          } else {
-            // User doesn't exist in profiles, this is a new signup
-            print('User does not exist in profiles table - new signup');
-            isNewUser = true;
-          }
+          print(
+              'Attempting to insert into profiles: id=${response.user!.id}, role=$userRoleString');
+
+          await client.from('profiles').insert({
+            'id': response.user!.id,
+            'email': response.user!.email,
+            'role': userRoleString,
+            'created_at': currentTime,
+            'updated_at': currentTime,
+          });
+          print(
+              'User profile inserted into profiles table for ${response.user!.id}');
         } catch (e) {
-          print('Error checking profiles table: $e');
-          // If we can't check, assume it's new (safer for UX)
-          isNewUser = true;
+          print('Error saving user profile to profiles table: $e');
+          if (e is PostgrestException) {
+            print('Postgrest Error Details: ${e.details}');
+            print('Postgrest Error Hint: ${e.hint}');
+            print('Postgrest Error Code: ${e.code}');
+          }
+
+          // Don't fail the signup if profiles insert fails - user can still use the app
+          print(
+              'Continuing with signup despite profiles insert failure - user can still use the app');
         }
+      } else if (response.user != null && !isNewUser) {
+        print('Existing user detected - skipping profiles insert.');
+      } else {
+        print(
+            'Signup response did not contain a user object. Skipping profiles insert.');
       }
+
+      // For debugging: log the final decision
+      print(
+          'Final signup result: User exists: ${response.user != null}, IsNewUser: $isNewUser');
+
     } catch (authError) {
       print('Error during client.auth.signUp: $authError');
       // Re-throw the error for UI to handle
       throw authError;
     }
 
-    if (response.user != null && isNewUser) {
-      print('New user signup detected - inserting into profiles table.');
-      try {
-        final String userRoleString = role == UserRole.admin ? 'admin' : 'user';
-        final String currentTime = DateTime.now().toIso8601String();
-
-        print(
-            'Attempting to insert into profiles: id=${response.user!.id}, role=$userRoleString');
-
-        await client.from('profiles').insert({
-          'id': response.user!.id,
-          'email': response.user!.email,
-          'name':
-              data['name'] ?? response.user!.email?.split('@').first ?? 'User',
-          'role': userRoleString,
-          'created_at': currentTime,
-          'updated_at': currentTime,
-        });
-        print(
-            'User profile inserted into profiles table for ${response.user!.id}');
-      } catch (e) {
-        print('Error saving user profile to profiles table: $e');
-        if (e is PostgrestException) {
-          print('Postgrest Error Details: ${e.details}');
-          print('Postgrest Error Hint: ${e.hint}');
-          print('Postgrest Error Code: ${e.code}');
-        }
-
-        // Don't fail the signup if profiles insert fails - user can still use the app
-        print(
-            'Continuing with signup despite profiles insert failure - user can still use the app');
-      }
-
-      // Note: If profiles insert failed above, user can still authenticate and use basic features
-      // when the user accesses their profile
-    } else if (response.user != null && !isNewUser) {
-      print('Existing user detected - skipping profiles insert.');
-    } else {
-      print(
-          'Signup response did not contain a user object. Skipping profiles insert.');
-    }
-
-    // For debugging: log the final decision
-    print(
-        'Final signup result: User exists: ${response.user != null}, IsNewUser: $isNewUser');
-
-    return response;
+    return SignUpResult(authResponse: response, isNewUser: isNewUser);
   }
 
   Future<AuthResponse> signIn({
@@ -576,7 +520,9 @@ class SupabaseService {
       // This will use the deep link scheme for the app
       await client.auth.resetPasswordForEmail(
         email,
-        redirectTo: 'com.example.indoornavigation://auth/callback',
+  // Use a distinct redirect path for password reset so it doesn't conflict
+  // with email confirmation links which use '/auth/callback'.
+  redirectTo: 'com.example.indoornavigation://auth/reset',
       );
     } catch (e) {
       print('Reset password error: $e');
@@ -659,7 +605,7 @@ class SupabaseService {
       // Fetch all users directly from profiles table
       final profilesResponse = await client
           .from('profiles')
-          .select('id, email, name, role, created_at');
+          .select('id, email, role, created_at');
 
       final List<Map<String, dynamic>> profiles =
           List<Map<String, dynamic>>.from(profilesResponse);
@@ -675,7 +621,6 @@ class SupabaseService {
           'user_id': profile['id'],
           'role': profile['role'] ?? 'user',
           'email': profile['email'],
-          'name': profile['name'],
         };
       }).toList();
 
@@ -1898,7 +1843,7 @@ class SupabaseService {
       // 2. Have no organization assigned
       final usersResponse = await client
           .from('profiles')
-          .select('id, email, name, role, organization_id, created_at')
+          .select('id, email, role, organization_id, created_at')
           .or('organization_id.is.null,or(organization_id.in.(${accessibleOrgIds.join(",")}))')
           .order('created_at', ascending: false);
 
@@ -2382,9 +2327,9 @@ class SupabaseService {
       // Get all users in this organization
       final usersResponse = await client
           .from('profiles')
-          .select('id, email, name, role, created_at')
+          .select('id, email, role, created_at')
           .eq('organization_id', organizationId)
-          .order('name', ascending: true);
+          .order('email', ascending: true);
 
       return List<Map<String, dynamic>>.from(usersResponse);
     } catch (e) {

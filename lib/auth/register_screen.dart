@@ -15,7 +15,6 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
@@ -31,7 +30,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
-    _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -73,7 +71,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         password: _passwordController.text,
         role: _isAdmin ? UserRole.admin : UserRole.user,
         data: {
-          'name': _nameController.text.trim(),
         },
       );
       
@@ -201,26 +198,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       SizedBox(height: verticalSpacing),
                     ],
-                    TextFormField(
-                      controller: _nameController,
-                      style: const TextStyle(fontSize: 16),
-                      decoration: const InputDecoration(
-                        labelText: 'Full Name',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.person),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
-                        ),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your name';
-                        }
-                        return null;
-                      },
-                    ),
-                    SizedBox(height: verticalSpacing),
                     TextFormField(
                       controller: _emailController,
                       style: const TextStyle(fontSize: 16),

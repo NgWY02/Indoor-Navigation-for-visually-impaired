@@ -82,33 +82,53 @@ class _MyAppState extends State<MyApp> {
 
   void _handleDeepLink(Uri uri) {
     // This function handles deep links for both password recovery and email confirmation.
-    if ((uri.path == '/callback' || uri.path == '/auth/callback' || uri.host == 'auth') 
-        && (uri.fragment.isNotEmpty || uri.query.isNotEmpty)) {
+  // Normalize and check for known callback paths.
+  final path = uri.path.toLowerCase();
+  final isCallbackPath = path == '/callback' || path == '/auth/callback' || path == '/auth';
+  final isResetPath = path == '/reset' || path == '/auth/reset';
+
+  if ((isCallbackPath || isResetPath || uri.host == 'auth') && (uri.fragment.isNotEmpty || uri.query.isNotEmpty)) {
       
       final params = Uri.splitQueryString(uri.fragment.isNotEmpty ? uri.fragment : uri.query);
       final accessToken = params['access_token'];
       final refreshToken = params['refresh_token'];
       final type = params['type'];
-      
-      print('Handling deep link with type: $type, has access_token: ${accessToken != null}');
+      final code = params['code'];
 
-      // The presence of an access_token indicates a session has been established by the link.
-      // We now differentiate based on the 'type' parameter.
+  // Diagnostic log: print the full incoming URI and parsed pieces so we can
+  // verify that Supabase's 'state' and 'code' parameters are present.
+  print('Incoming deep link: $uri');
+  print('  - path: ${uri.path}');
+  print('  - fragment: ${uri.fragment}');
+  print('  - query: ${uri.query}');
+  print('  - parsed params: ${params}');
+  print('Handling deep link with type: $type, has access_token: ${accessToken != null}, has_code: ${code != null}');
+
+      // 1) If the link carries tokens (access/refresh) in the fragment/query, handle
+      //    according to the explicit path OR the 'type' param. Path wins: if URL was
+      //    generated with the reset redirectTo (contains /reset), prefer recovery.
       if (accessToken != null && refreshToken != null) {
-        if (type == 'recovery') {
-          // This is explicitly a password recovery link.
-          print('Deep link identified as PASSWORD RECOVERY.');
+        if (isResetPath || type == 'recovery') {
+          print('Deep link identified as PASSWORD RECOVERY (token path or reset path).');
           _navigateToNewPasswordScreen(accessToken, refreshToken);
         } else {
-          // This is an email confirmation link (or another type we treat as such).
-          print('Deep link identified as EMAIL CONFIRMATION.');
+          print('Deep link identified as EMAIL CONFIRMATION (token path).');
           _handleEmailConfirmation(accessToken, refreshToken);
         }
+        return;
       }
-      // Handle the OAuth code flow which doesn't pass tokens directly in the URL.
-      else if (params.containsKey('code')) {
-         print('Deep link identified as OAuth code exchange flow.');
-        _handleAuthCodeExchange(params['code']!);
+
+      // 2) If no tokens are present but a code is provided, this is typically an OAuth
+      //    or code-exchange flow. Only treat it as password recovery if the `type` param
+      //    explicitly indicates 'recovery'. Otherwise handle it as confirmation/code-exchange.
+      if (code != null) {
+        if (isResetPath || type == 'recovery') {
+          print('Deep link identified as PASSWORD RECOVERY (code flow).');
+          _handleAuthCodeExchange(uri, expectedType: 'recovery');
+        } else {
+          print('Deep link identified as CODE/OAUTH flow (treated as confirmation).');
+          _handleAuthCodeExchange(uri, expectedType: 'confirm');
+        }
       }
     }
   }
@@ -164,20 +184,34 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
-  Future<void> _handleAuthCodeExchange(String authCode) async {
+  // Accept the original incoming Uri so Supabase can validate state parameters
+  Future<void> _handleAuthCodeExchange(Uri callbackUri, {String? expectedType}) async {
     try {
-      // Construct the full callback URL that Supabase expects
-      final fullCallbackUrl = 'com.example.indoornavigation://auth/callback?code=$authCode';
-      
-      // Let Supabase handle the full URL processing
       final supabaseService = SupabaseService();
-      final response = await supabaseService.client.auth.getSessionFromUrl(Uri.parse(fullCallbackUrl));
-      
+
+      // Pass the full incoming URI through so Supabase can validate 'state' and other params
+      final response = await supabaseService.client.auth.getSessionFromUrl(callbackUri);
       final session = response.session;
-      if (session.accessToken.isNotEmpty) {
-        _navigateToNewPasswordScreen(session.accessToken, session.refreshToken ?? '');
+
+  if (session.accessToken.isNotEmpty) {
+        if (expectedType == 'recovery') {
+          _navigateToNewPasswordScreen(session.accessToken, session.refreshToken ?? '');
+        } else {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            final context = navigatorKey.currentContext;
+            if (context != null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Welcome!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+              Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+            }
+          });
+        }
       } else {
-        _showError('Failed to process password reset link. Please try again.');
+        _showError('Failed to process link. Please try again.');
       }
     } catch (e) {
       _showError('Error processing reset link: ${e.toString()}');
