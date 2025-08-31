@@ -42,7 +42,7 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
   String _statusMessage = "Initializing...";
   int _waypointCount = 0;
   bool _isRecording = false;
-  bool _isPaused = false;
+  bool _isProcessing = false; // Track when waypoints are being processed
   
   // Path info
   final TextEditingController _pathNameController = TextEditingController();
@@ -67,7 +67,7 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     
     setState(() {
       _isLoading = false;
-      _statusMessage = "Ready to record path";
+      _statusMessage = "";
     });
   }
 
@@ -125,6 +125,17 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
       onStatusUpdate: (message) {
         setState(() {
           _statusMessage = message;
+          // Detect when processing starts
+          if (message.contains('Processing') || message.contains('Recording stopped. Processing')) {
+            _isProcessing = true;
+          }
+          // Detect when processing ends
+          else if (message.contains('Recording complete') || 
+                   message.contains('Path saved') || 
+                   message.contains('Error') ||
+                   message.contains('Failed')) {
+            _isProcessing = false;
+          }
         });
         _speak(message);
       },
@@ -172,7 +183,7 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     await _pathRecorder.startRecording(pathId);
     setState(() {
       _isRecording = true;
-      _isPaused = false;
+      _isProcessing = false; // Reset processing state when starting new recording
     });
   }
 
@@ -180,63 +191,13 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     await _pathRecorder.stopRecording();
     setState(() {
       _isRecording = false;
-      _isPaused = false;
+      // Note: _isProcessing will be set to true by the status update callback
+      // when processing starts, and reset when processing completes
     });
     
     if (_pathRecorder.waypointCount > 0) {
       _showSavePathDialog();
     }
-  }
-
-  Future<void> _pauseRecording() async {
-    await _pathRecorder.pauseRecording();
-    setState(() {
-      _isPaused = true;
-    });
-  }
-
-  Future<void> _resumeRecording() async {
-    await _pathRecorder.resumeRecording();
-    setState(() {
-      _isPaused = false;
-    });
-  }
-
-  void _addManualWaypoint() {
-    _showManualWaypointDialog();
-  }
-
-  void _showManualWaypointDialog() {
-    final TextEditingController controller = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add Manual Waypoint'),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(
-            hintText: 'Describe this location (e.g., "Door to cafeteria")',
-          ),
-          maxLines: 2,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.isNotEmpty) {
-                _pathRecorder.addManualWaypoint(controller.text);
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Add'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showSavePathDialog() {
@@ -311,7 +272,7 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
       try {
         await supabaseService.savePath(path);
       } catch (saveError) {
-        print('❌ Save path error: $saveError');
+        print(' Save path error: $saveError');
 
         // Check if it's an RLS policy violation
         if (saveError.toString().contains('violates row-level security policy') ||
@@ -406,31 +367,29 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final screenHeight = mediaQuery.size.height;
-    final isTablet = screenWidth > 600;
-    final isLandscape = screenWidth > screenHeight;
-    final bottomSafeArea = mediaQuery.padding.bottom;
-    final hasBottomNavigation = bottomSafeArea > 0;
+    final screenSize = MediaQuery.of(context).size;
+    final screenWidth = screenSize.width;
+    final screenHeight = screenSize.height;
+    final isPortrait = screenHeight > screenWidth;
 
     if (_isLoading) {
       return Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'Path Recording',
-            style: TextStyle(fontSize: isTablet ? 22 : 20),
-          ),
-          backgroundColor: Colors.teal,
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 20),
-              Text("Initializing path recording..."),
-            ],
+        body: Container(
+          color: Colors.teal,
+          child: const SafeArea(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 20),
+                  Text(
+                    "Initializing path recording...",
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       );
@@ -438,277 +397,340 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
 
     if (!_cameraController.value.isInitialized) {
       return Scaffold(
-        appBar: AppBar(
-          title: Text(
-            'Path Recording',
-            style: TextStyle(fontSize: isTablet ? 22 : 20),
-          ),
-          backgroundColor: Colors.teal,
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 20),
-              Text("Initializing camera..."),
-            ],
+        body: Container(
+          color: Colors.teal,
+          child: const SafeArea(
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 20),
+                  Text(
+                    "Initializing camera...",
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       );
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          isTablet ? '${widget.startLocationName} → ${widget.endLocationName}' : 'Record Path',
-          style: TextStyle(fontSize: isTablet ? 20 : 18),
-        ),
-        backgroundColor: Colors.teal,
-        actions: [
-          if (_isRecording && !_isPaused)
-            IconButton(
-              icon: const Icon(Icons.pause),
-              onPressed: _pauseRecording,
-              tooltip: 'Pause Recording',
-            ),
-          if (_isRecording && _isPaused)
-            IconButton(
-              icon: const Icon(Icons.play_arrow),
-              onPressed: _resumeRecording,
-              tooltip: 'Resume Recording',
-            ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Camera preview - responsive flex ratios
-            Expanded(
-              flex: isLandscape ? 2 : (isTablet ? 3 : 3),
-              child: Stack(
-                children: [
-                  CameraPreview(_cameraController),
-                
-                // Recording overlay
-                if (_isRecording)
-                  Container(
-                    color: Colors.red.withOpacity(0.1),
-                    child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            _isPaused ? Icons.pause_circle : Icons.fiber_manual_record,
-                            color: _isPaused ? Colors.orange : Colors.red,
-                            size: isTablet ? 80 : 60,
+      body: Container(
+        color: Colors.black,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Camera preview - responsive for phones
+              Expanded(
+                flex: isPortrait ? 5 : 3,
+                child: Stack(
+                  children: [
+                    // Camera preview
+                    Positioned.fill(
+                      child: CameraPreview(_cameraController),
+                    ),
+
+                    // Compact route info overlay - responsive positioning
+                    Positioned(
+                      top: screenHeight * 0.02,
+                      left: screenWidth * 0.05,
+                      right: screenWidth * 0.05,
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: screenWidth * 0.04,
+                          vertical: screenHeight * 0.01,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.startLocationName,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: screenWidth * 0.03,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            SizedBox(width: screenWidth * 0.02),
+                            Icon(
+                              Icons.arrow_forward,
+                              color: Colors.teal,
+                              size: screenWidth * 0.04,
+                            ),
+                            SizedBox(width: screenWidth * 0.02),
+                            Flexible(
+                              child: Text(
+                                widget.endLocationName,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: screenWidth * 0.03,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Status overlay - responsive positioning
+                    Positioned(
+                      top: screenHeight * 0.08,
+                      left: screenWidth * 0.05,
+                      child: Container(
+                        padding: EdgeInsets.all(screenWidth * 0.02),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Waypoints: $_waypointCount",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: screenWidth * 0.03,
+                              ),
+                            ),
+                            Text(
+                              "Heading: ${_getDirectionName(_currentHeading)}",
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: screenWidth * 0.025,
+                              ),
+                            ),
+                            if (_currentHeading != null)
+                              Text(
+                                "${_currentHeading!.round()}°",
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: screenWidth * 0.025,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Status message overlay - responsive positioning
+                    if (_statusMessage.isNotEmpty && !_isProcessing)
+                      Positioned(
+                        left: screenWidth * 0.05,
+                        right: screenWidth * 0.05,
+                        bottom: screenHeight * 0.02,
+                        child: Container(
+                          padding: EdgeInsets.all(screenWidth * 0.02),
+                          decoration: BoxDecoration(
+                            color: Colors.black54,
+                            borderRadius: BorderRadius.circular(8),
                           ),
-                          SizedBox(height: isTablet ? 16 : 10),
-                          Text(
-                            _isPaused ? 'PAUSED' : 'RECORDING',
+                          child: Text(
+                            _statusMessage,
                             style: TextStyle(
                               color: Colors.white,
-                              fontSize: isTablet ? 22 : 18,
-                              fontWeight: FontWeight.bold,
+                              fontSize: screenWidth * 0.03,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+
+                    // Processing overlay - blocks interactions during waypoint processing
+                    if (_isProcessing)
+                      Positioned.fill(
+                        child: Container(
+                          color: Colors.black.withValues(alpha: 0.8),
+                          child: Center(
+                            child: Container(
+                              padding: EdgeInsets.all(screenWidth * 0.06),
+                              margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.1),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(20),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    blurRadius: 10,
+                                    spreadRadius: 2,
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  // Processing indicator
+                                  SizedBox(
+                                    width: screenWidth * 0.15,
+                                    height: screenWidth * 0.15,
+                                    child: const CircularProgressIndicator(
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                                      strokeWidth: 4,
+                                    ),
+                                  ),
+                                  SizedBox(height: screenHeight * 0.02),
+                                  // Processing title
+                                  Text(
+                                    "Processing Waypoints",
+                                    style: TextStyle(
+                                      fontSize: screenWidth * 0.045,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  SizedBox(height: screenHeight * 0.01),
+                                  // Processing message
+                                  Text(
+                                    _statusMessage,
+                                    style: TextStyle(
+                                      fontSize: screenWidth * 0.035,
+                                      color: Colors.black54,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  SizedBox(height: screenHeight * 0.02),
+                                  // Processing hint
+                                  Text(
+                                    "Please wait while we process your recorded path...",
+                                    style: TextStyle(
+                                      fontSize: screenWidth * 0.03,
+                                      color: Colors.black45,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Bottom controls - responsive for phones
+              Container(
+                padding: EdgeInsets.all(screenWidth * 0.04),
+                color: Colors.white,
+                child: Column(
+                  children: [
+                    // Main control buttons - responsive sizing
+                    if (!_isRecording)
+                      Row(
+                        children: [
+                          // Cancel button - responsive
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              icon: Icon(Icons.cancel, size: screenWidth * 0.045),
+                              label: Text(
+                                "Cancel",
+                                style: TextStyle(fontSize: screenWidth * 0.03),
+                              ),
+                              onPressed: _isProcessing ? null : () => Navigator.of(context).pop(),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: _isProcessing ? Colors.grey[400] : Colors.grey[700],
+                                side: BorderSide(color: _isProcessing ? Colors.grey[300]! : Colors.grey[400]!),
+                                padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: screenWidth * 0.02),
+                          // Start Recording button - responsive
+                          Expanded(
+                            flex: 2,
+                            child: ElevatedButton.icon(
+                              icon: Icon(Icons.play_arrow, size: screenWidth * 0.045),
+                              label: Text(
+                                "Start Recording",
+                                style: TextStyle(fontSize: screenWidth * 0.03),
+                              ),
+                              onPressed: _isProcessing ? null : (_isClipServerReady ? _startRecording : null),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isProcessing ? Colors.grey[400] : Colors.green,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
                             ),
                           ),
                         ],
                       ),
-                    ),
-                  ),
 
-                // Status overlay (top-left)
-                Positioned(
-                  top: isTablet ? 24 : 20,
-                  left: isTablet ? 24 : 20,
-                  child: Container(
-                    padding: EdgeInsets.all(isTablet ? 16 : 12),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(isTablet ? 16 : 10),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Waypoints: $_waypointCount",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: isTablet ? 16 : 14,
-                          ),
-                        ),
-                        Text(
-                          "Heading: ${_getDirectionName(_currentHeading)}",
-                          style: TextStyle(
-                            color: Colors.white70,
-                            fontSize: isTablet ? 14 : 12,
-                          ),
-                        ),
-                        if (_currentHeading != null)
-                          Text(
-                            "${_currentHeading!.round()}°",
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: isTablet ? 14 : 12,
+                    if (_isRecording)
+                      Row(
+                        children: [
+                          // Stop Recording button - responsive, full width
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              icon: Icon(Icons.stop, size: screenWidth * 0.045),
+                              label: Text(
+                                "Stop Recording",
+                                style: TextStyle(fontSize: screenWidth * 0.03),
+                              ),
+                              onPressed: _isProcessing ? null : _stopRecording,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _isProcessing ? Colors.grey[400] : Colors.red,
+                                foregroundColor: Colors.white,
+                                padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
                             ),
                           ),
-                      ],
-                    ),
-                  ),
-                ),
-                ],
-              ),
-            ),
+                        ],
+                      ),
 
-            // Route info
-            Container(
-              padding: EdgeInsets.all(isTablet ? 20 : 16),
-              color: Colors.teal.shade50,
-              width: double.infinity,
-              child: Column(
-                children: [
-                  Text(
-                    "From: ${widget.startLocationName}",
-                    style: TextStyle(
-                      fontSize: isTablet ? 18 : 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Icon(
-                    Icons.arrow_downward,
-                    color: Colors.teal,
-                    size: isTablet ? 28 : 24,
-                  ),
-                  Text(
-                    "To: ${widget.endLocationName}",
-                    style: TextStyle(
-                      fontSize: isTablet ? 18 : 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Status message
-            Container(
-              padding: EdgeInsets.all(isTablet ? 20 : 16),
-              color: Colors.teal.shade100,
-              width: double.infinity,
-              child: Text(
-                _statusMessage,
-                style: TextStyle(fontSize: isTablet ? 18 : 16),
-                textAlign: TextAlign.center,
-              ),
-            ),
-
-            // Control buttons
-            Padding(
-              padding: EdgeInsets.only(
-                left: isTablet ? 24 : 16,
-                right: isTablet ? 24 : 16,
-                top: isTablet ? 24 : 16,
-                bottom: hasBottomNavigation ? (isTablet ? 32 : 24) : (isTablet ? 24 : 16),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      if (!_isRecording)
-                        ElevatedButton.icon(
-                          icon: Icon(Icons.play_arrow, size: isTablet ? 24 : 20),
-                          label: Text(
-                            "Start Recording",
-                            style: TextStyle(fontSize: isTablet ? 16 : 14),
-                          ),
-                          onPressed: _isClipServerReady ? _startRecording : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isTablet ? 24 : 20,
-                              vertical: isTablet ? 16 : 12,
+                    if (!_isRecording && _waypointCount > 0)
+                      Padding(
+                        padding: EdgeInsets.only(top: screenHeight * 0.015),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.save, size: screenWidth * 0.045),
+                            label: Text(
+                              "Save Path",
+                              style: TextStyle(fontSize: screenWidth * 0.03),
                             ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
+                            onPressed: _isProcessing ? null : () => _showSavePathDialog(),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isProcessing ? Colors.grey[400] : Colors.teal,
+                              foregroundColor: Colors.white,
+                              padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
-                          ),
-                        ),
-                      
-                      if (_isRecording)
-                        ElevatedButton.icon(
-                          icon: Icon(Icons.stop, size: isTablet ? 24 : 20),
-                          label: Text(
-                            "Stop Recording",
-                            style: TextStyle(fontSize: isTablet ? 16 : 14),
-                          ),
-                          onPressed: _stopRecording,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.red,
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isTablet ? 24 : 20,
-                              vertical: isTablet ? 16 : 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
-                            ),
-                          ),
-                        ),
-                      
-                      if (_isRecording)
-                        ElevatedButton.icon(
-                          icon: Icon(Icons.add_location, size: isTablet ? 24 : 20),
-                          label: Text(
-                            "Add Landmark",
-                            style: TextStyle(fontSize: isTablet ? 16 : 14),
-                          ),
-                          onPressed: _addManualWaypoint,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            foregroundColor: Colors.white,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isTablet ? 24 : 20,
-                              vertical: isTablet ? 16 : 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  
-                  if (!_isRecording && _waypointCount > 0)
-                    Padding(
-                      padding: EdgeInsets.only(top: isTablet ? 16 : 12),
-                      child: ElevatedButton.icon(
-                        icon: Icon(Icons.save, size: isTablet ? 24 : 20),
-                        label: Text(
-                          "Save Path",
-                          style: TextStyle(fontSize: isTablet ? 16 : 14),
-                        ),
-                        onPressed: () => _showSavePathDialog(),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
-                          foregroundColor: Colors.white,
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isTablet ? 24 : 20,
-                            vertical: isTablet ? 16 : 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(isTablet ? 12 : 8),
                           ),
                         ),
                       ),
-                    ),
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
       ),
     );
   }

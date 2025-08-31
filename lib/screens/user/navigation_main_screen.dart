@@ -19,7 +19,7 @@ class NavigationMainScreen extends StatefulWidget {
 }
 
 class _NavigationMainScreenState extends State<NavigationMainScreen> 
-    with WidgetsBindingObserver, DebugOverlayMixin { 
+    with WidgetsBindingObserver { 
   // Services
   late ClipService _clipService;
   late SupabaseService _supabaseService;
@@ -41,6 +41,10 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   // UI State
   bool _isProcessingFrame = false;
   Timer? _frameProcessingTimer;
+  
+  // Debug overlay
+  bool _isDebugVisible = false;
+  String _debugInfo = '🐛 Debug overlay ready';
 
   @override
   void initState() {
@@ -57,46 +61,6 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     _navigationService.dispose();
     _localizationService.dispose();
     super.dispose();
-  }
-
-  // Override debug mixin method to test authentication status
-  @override
-  void testStepCounter() async {
-    // Test authentication status - method removed
-    updateDebugInfo('🔐 AUTHENTICATION STATUS: Method removed');
-  }
-
-  @override
-  void testPathCreation() async {
-    try {
-      updateDebugInfo('🧪 Starting path creation and loading test...');
-      await _supabaseService.testPathCreationAndLoading();
-      updateDebugInfo('✅ Path creation test completed - check console logs');
-    } catch (e) {
-      updateDebugInfo('❌ Path creation test failed: $e');
-    }
-  }
-
-  @override
-  void debugDatabaseContents() async {
-    try {
-      updateDebugInfo('🔍 Starting database debug check...');
-      await _supabaseService.debugCheckExistingPaths();
-      updateDebugInfo('✅ Database debug completed - check console logs');
-    } catch (e) {
-      updateDebugInfo('❌ Database debug failed: $e');
-    }
-  }
-
-  @override
-  void runDatabaseMigration() async {
-    try {
-      updateDebugInfo('🔧 Starting organization migration...');
-      final result = await _supabaseService.runOrganizationMigration();
-      updateDebugInfo('✅ Organization migration completed!\n${result.toString()}');
-    } catch (e) {
-      updateDebugInfo('❌ Migration failed: $e');
-    }
   }
 
   @override
@@ -120,7 +84,6 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       _localizationService = PositionLocalizationService(
         clipService: _clipService,
         supabaseService: _supabaseService,
-        onDebugUpdate: updateDebugInfo, // 🐛 Add debug callback for location identification
       );
       _navigationService = nav_service.RealTimeNavigationService(
         clipService: _clipService,
@@ -128,7 +91,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         onStatusUpdate: _onStatusUpdate,
         onInstructionUpdate: _onInstructionUpdate,
         onError: _onError,
-        onDebugUpdate: updateDebugInfo, // 
+        onDebugUpdate: _onDebugUpdate,
       );
 
       // Initialize camera
@@ -349,6 +312,12 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     );
   }
 
+  void _onDebugUpdate(String debugInfo) {
+    setState(() {
+      _debugInfo = debugInfo;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -371,8 +340,6 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
                 ),
               ],
             ),
-            // 🐛 Debug overlay
-            buildDebugOverlay(),
           ],
         ),
       ),
@@ -448,6 +415,17 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
               ],
             ),
           ),
+        ),
+
+        // Debug overlay
+        DebugOverlay(
+          debugInfo: _debugInfo,
+          isVisible: _isDebugVisible,
+          onToggle: () {
+            setState(() {
+              _isDebugVisible = !_isDebugVisible;
+            });
+          },
         ),
       ],
     );

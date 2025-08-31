@@ -142,14 +142,12 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                 'id': path.id,
                 'node_a_id': startNode['id'],
                 'node_b_id': endNode['id'],
-                'distance_meters': path.estimatedDistance,
-                'steps': path.estimatedSteps,
                 'custom_instruction': 'Recorded Path: ${path.name}',
-                'connection_type': 'recorded', // Mark as recorded path
+                'connection_type': 'recorded', 
                 'created_at': path.createdAt.toIso8601String(),
               });
             } else {
-              print('  ❌ Path not matched - nodes not found in current map');
+              print('Path not matched - nodes not found in current map');
             }
           }
           
@@ -361,10 +359,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           children: [
             Text('From: ${nodeA['name']}'),
             Text('To: ${nodeB['name']}'),
-            if (connection['distance_meters'] != null)
-              Text('Distance: ${connection['distance_meters'].toStringAsFixed(1)}m'),
-            if (connection['steps'] != null)
-              Text('Steps: ${connection['steps']}'),
             if (connection['custom_instruction'] != null)
               Text('Note: ${connection['custom_instruction']}'),
           ],
@@ -539,194 +533,127 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenSize = MediaQuery.of(context).size;
-        final isMobile = screenSize.width < 600;
-        final isTablet = screenSize.width >= 600 && screenSize.width < 900;
-        final isLargeTablet = screenSize.width >= 900;
-        final bottomPadding = MediaQuery.of(context).padding.bottom;
-        
-        return Scaffold(
-          appBar: AppBar(
-            title: FutureBuilder<Map<String, dynamic>>(
-              future: _mapDetailsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.hasData) {
-                  return Text(
-                    snapshot.data!['name'] ?? 'Map Details',
-                    style: TextStyle(
-                      fontSize: isMobile ? 18 : 20,
-                    ),
-                  );
-                }
-                return Text(
-                  'Map Details',
-                  style: TextStyle(
-                    fontSize: isMobile ? 18 : 20,
+    final screenSize = MediaQuery.of(context).size;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: FutureBuilder<Map<String, dynamic>>(
+          future: _mapDetailsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.hasData) {
+              return Text(
+                snapshot.data!['name'] ?? 'Map Details',
+                style: TextStyle(
+                  fontSize: 18,
+                ),
+              );
+            }
+            return Text(
+              'Map Details',
+              style: TextStyle(
+                fontSize: 18,
+              ),
+            );
+          },
+        ),
+        backgroundColor: Colors.teal,
+        actions: _buildResponsiveActions(),
+      ),
+      body: SafeArea(
+        child: FutureBuilder<Map<String, dynamic>>(
+          future: _mapDetailsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Error: ${snapshot.error}',
+                    style: TextStyle(fontSize: 14),
+                    textAlign: TextAlign.center,
                   ),
-                );
-              },
-            ),
-            backgroundColor: _isConnectionMode ? Colors.orange[100] : null,
-            actions: _buildResponsiveActions(isMobile),
-          ),
-          body: SafeArea(
-            child: FutureBuilder<Map<String, dynamic>>(
-              future: _mapDetailsFuture,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(isMobile ? 16 : 24),
-                      child: Text(
-                        'Error: ${snapshot.error}',
-                        style: TextStyle(fontSize: isMobile ? 14 : 16),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                  );
-                }
-                if (!snapshot.hasData) {
-                  return Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(isMobile ? 16 : 24),
-                      child: Text(
-                        'Map details not found.',
-                        style: TextStyle(fontSize: isMobile ? 14 : 16),
-                      ),
-                    ),
-                  );
-                }
+                ),
+              );
+            }
+            if (!snapshot.hasData) {
+              return Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text(
+                    'Map details not found.',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                ),
+              );
+            }
 
                 final mapData = snapshot.data!;
                 final List<dynamic> nodes = mapData['map_nodes'] ?? [];
 
-                if (isLargeTablet) {
-                  // Large tablet layout - side by side with more space for map
-                  return Column(
-                    children: [
-                      if (_isConnectionMode) _buildConnectionModeHeader(isMobile),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 3,
-                              child: _buildMapView(nodes, context),
-                            ),
-                            Container(
-                              width: 400,
-                              decoration: BoxDecoration(
-                                border: Border(
-                                  left: BorderSide(color: Colors.grey.shade300),
-                                ),
-                              ),
-                              child: _buildDetailsPanel(nodes, context),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                } else if (isTablet) {
-                  // Tablet layout - balanced side by side
-                  return Column(
-                    children: [
-                      if (_isConnectionMode) _buildConnectionModeHeader(isMobile),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              flex: 2,
-                              child: _buildMapView(nodes, context),
-                            ),
-                            Expanded(
-                              flex: 1,
-                              child: _buildDetailsPanel(nodes, context),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  );
-                } else {
-                  // Mobile layout - stacked with responsive flex ratios
-                  return Column(
-                    children: [
-                      if (_isConnectionMode) _buildConnectionModeHeader(isMobile),
-                      Expanded(
-                        flex: screenSize.height > 700 ? 3 : 2,
-                        child: _buildMapView(nodes, context),
-                      ),
-                      Expanded(
-                        flex: screenSize.height > 700 ? 2 : 3,
-                        child: _buildDetailsPanel(nodes, context),
-                      ),
-                      SizedBox(height: bottomPadding),
-                    ],
-                  );
-                }
+                // Mobile layout only
+                return Column(
+                  children: [
+                    if (_isConnectionMode) _buildConnectionModeHeader(),
+                    Expanded(
+                      flex: screenSize.height > 700 ? 3 : 2,
+                      child: _buildMapView(nodes, context),
+                    ),
+                    Expanded(
+                      flex: screenSize.height > 700 ? 2 : 3,
+                      child: _buildDetailsPanel(nodes, context),
+                    ),
+                    SizedBox(height: bottomPadding),
+                  ],
+                );
               },
             ),
           ),
         );
-      },
-    );
   }
 
-  List<Widget> _buildResponsiveActions(bool isMobile) {
+  List<Widget> _buildResponsiveActions() {
     final actions = [
-      IconButton(
+      TextButton.icon(
         icon: Icon(
           _isConnectionMode ? Icons.link_off : Icons.link,
           color: _isConnectionMode ? Colors.orange[800] : null,
-          size: isMobile ? 20 : 24,
+          size: 20,
         ),
-        tooltip: _isConnectionMode ? 'Exit Connection Mode' : 'Connection Mode',
+        label: Text(
+          _isConnectionMode ? 'Exit' : 'Connect',
+          style: TextStyle(
+            color: _isConnectionMode ? Colors.orange[800] : null,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         onPressed: _toggleConnectionMode,
-      ),
-      IconButton(
-        icon: Icon(
-          Icons.refresh,
-          size: isMobile ? 20 : 24,
+        style: TextButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         ),
-        tooltip: 'Refresh Connections',
-        onPressed: () {
-          print('🔄 Manual refresh triggered by user');
-          _loadConnections();
-        },
-      ),
-      IconButton(
-        icon: Icon(
-          Icons.add_location_alt,
-          size: isMobile ? 20 : 24,
-        ),
-        tooltip: 'Add New Node',
-        onPressed: () {
-          _navigateToNodeCapture();
-        },
       ),
     ];
 
     return actions;
   }
 
-  Widget _buildConnectionModeHeader(bool isMobile) {
+  Widget _buildConnectionModeHeader() {
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.all(isMobile ? 12.0 : 16.0),
-      color: Colors.orange.withOpacity(0.1),
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+      color: Colors.orange.withValues(alpha: 0.1),
       child: Text(
-        _selectedStartNodeId == null 
+        _selectedStartNodeId == null
           ? 'Connection Mode: Tap a node to select start point'
           : 'Connection Mode: Tap another node to create connection',
-        style: TextStyle(
+        style: const TextStyle(
           fontWeight: FontWeight.bold,
-          color: Colors.orange[800],
-          fontSize: isMobile ? 14 : 16,
+          color: Colors.orange,
+          fontSize: 12,
         ),
         textAlign: TextAlign.center,
       ),
@@ -738,311 +665,288 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenSize = MediaQuery.of(context).size;
-        final isMobile = screenSize.width < 600;
-        
-        return Container(
-          padding: EdgeInsets.all(isMobile ? 8.0 : 16.0),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final double mapAspectRatio = _mapService.mapUIImage!.width / _mapService.mapUIImage!.height;
-              
-              final containerWidth = constraints.maxWidth;
-              final containerHeight = constraints.maxHeight;
-              
-              final double targetWidth, targetHeight;
-              if (containerWidth / containerHeight > mapAspectRatio) {
-                targetHeight = containerHeight;
-                targetWidth = containerHeight * mapAspectRatio;
-              } else {
-                targetWidth = containerWidth;
-                targetHeight = containerWidth / mapAspectRatio;
-              }
-              
-              final scaleX = targetWidth / _mapService.mapUIImage!.width;
-              final scaleY = targetHeight / _mapService.mapUIImage!.height;
-              
-              return Center(
-                child: SizedBox(
-                  width: targetWidth,
-                  height: targetHeight,
-                  child: InteractiveViewer(
-                    minScale: 0.5,
-                    maxScale: isMobile ? 3.0 : 4.0,
-                    child: Stack(
-                      children: [
-                        // Map image with connections
-                        SizedBox(
-                          width: targetWidth,
-                          height: targetHeight,
-                          child: GestureDetector(
-                            onTapUp: (details) => _onMapTapped(details, targetWidth, targetHeight, scaleX, scaleY),
-                            child: CustomPaint(
-                              painter: MapWithConnectionsPainter(
-                                mapImage: _mapService.mapUIImage!,
-                                nodes: nodes,
-                                connections: _connections,
-                                selectedConnectionId: _selectedConnectionId,
-                              ),
-                              child: Container(),
-                            ),
+    return Container(
+      padding: EdgeInsets.all(8.0),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final double mapAspectRatio = _mapService.mapUIImage!.width / _mapService.mapUIImage!.height;
+          
+          final containerWidth = constraints.maxWidth;
+          final containerHeight = constraints.maxHeight;
+          
+          final double targetWidth, targetHeight;
+          if (containerWidth / containerHeight > mapAspectRatio) {
+            targetHeight = containerHeight;
+            targetWidth = containerHeight * mapAspectRatio;
+          } else {
+            targetWidth = containerWidth;
+            targetHeight = containerWidth / mapAspectRatio;
+          }
+          
+          final scaleX = targetWidth / _mapService.mapUIImage!.width;
+          final scaleY = targetHeight / _mapService.mapUIImage!.height;
+          
+          return Center(
+            child: SizedBox(
+              width: targetWidth,
+              height: targetHeight,
+              child: InteractiveViewer(
+                minScale: 0.5,
+                maxScale: 3.0,
+                child: Stack(
+                  children: [
+                    // Map image with connections
+                    SizedBox(
+                      width: targetWidth,
+                      height: targetHeight,
+                      child: GestureDetector(
+                        onTapUp: (details) => _onMapTapped(details, targetWidth, targetHeight, scaleX, scaleY),
+                        child: CustomPaint(
+                          painter: MapWithConnectionsPainter(
+                            mapImage: _mapService.mapUIImage!,
+                            nodes: nodes,
+                            connections: _connections,
+                            selectedConnectionId: _selectedConnectionId,
                           ),
+                          child: Container(),
                         ),
-                        
-                        // Interactive node markers
-                        for (int i = 0; i < nodes.length; i++) 
-                          _buildNodeMarker(nodes[i], i + 1, scaleX, scaleY),
-                      ],
+                      ),
                     ),
-                  ),
+                    
+                    // Interactive node markers
+                    for (int i = 0; i < nodes.length; i++) 
+                      _buildNodeMarker(nodes[i], i + 1, scaleX, scaleY),
+                  ],
                 ),
-              );
-            },
-          ),
-        );
-      },
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
   Widget _buildDetailsPanel(List<dynamic> nodes, BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenSize = MediaQuery.of(context).size;
-        final isMobile = screenSize.width < 600;
-        
-        return DefaultTabController(
-          length: 2,
-          child: Column(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.grey.withOpacity(0.3),
-                      blurRadius: 4,
-                      offset: const Offset(0, -2),
-                    ),
-                  ],
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(isMobile ? 16.0 : 20.0),
-                    topRight: Radius.circular(isMobile ? 16.0 : 20.0),
-                  ),
+    return DefaultTabController(
+      length: 2,
+      child: Column(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.3),
+                  blurRadius: 4,
+                  offset: const Offset(0, -2),
                 ),
-                child: TabBar(
-                  tabs: [
-                    Tab(
-                      text: 'Nodes',
-                      icon: Icon(
-                        Icons.location_on,
-                        size: isMobile ? 20 : 24,
-                      ),
-                    ),
-                    Tab(
-                      text: 'Connections',
-                      icon: Icon(
-                        Icons.link,
-                        size: isMobile ? 20 : 24,
-                      ),
-                    ),
-                  ],
-                  labelStyle: TextStyle(
-                    fontSize: isMobile ? 12 : 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  unselectedLabelStyle: TextStyle(
-                    fontSize: isMobile ? 12 : 14,
-                  ),
-                ),
+              ],
+              borderRadius: BorderRadius.only(
+                topLeft: Radius.circular(16.0),
+                topRight: Radius.circular(16.0),
               ),
-              Expanded(
-                child: TabBarView(
-                  children: [
-                    _buildNodesTab(nodes),
-                    _buildConnectionsTab(),
-                  ],
+            ),
+            child: TabBar(
+              tabs: [
+                Tab(
+                  text: 'Nodes',
+                  icon: Icon(
+                    Icons.location_on,
+                    size: 20,
+                  ),
                 ),
+                Tab(
+                  text: 'Connections',
+                  icon: Icon(
+                    Icons.link,
+                    size: 20,
+                  ),
+                ),
+              ],
+              labelStyle: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
               ),
-            ],
+              unselectedLabelStyle: TextStyle(
+                fontSize: 12,
+              ),
+            ),
           ),
-        );
-      },
+          Expanded(
+            child: TabBarView(
+              children: [
+                _buildNodesTab(nodes),
+                _buildConnectionsTab(),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildNodesTab(List<dynamic> nodes) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenSize = MediaQuery.of(context).size;
-        final isMobile = screenSize.width < 600;
-        
-        if (nodes.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: EdgeInsets.all(isMobile ? 16.0 : 24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+    if (nodes.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.location_off,
+                size: 48,
+                color: Colors.grey,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'No nodes added to this map yet.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tap the + button to add your first node.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(8.0),
+      itemCount: nodes.length,
+      itemBuilder: (context, index) {
+        final node = nodes[index];
+        final nodeName = node['name'] ?? 'Unnamed Node';
+        final nodeId = node['id'];
+
+        return Card(
+          margin: const EdgeInsets.symmetric(
+            vertical: 2.0,
+            horizontal: 2.0,
+          ),
+          elevation: 2,
+          child: InkWell(
+            onTap: _isConnectionMode
+              ? () => _onNodeTapped(nodeId, nodeName)
+              : null,
+            child: IntrinsicHeight(
+              child: Row(
                 children: [
-                  Icon(
-                    Icons.location_off,
-                    size: isMobile ? 48 : 64,
-                    color: Colors.grey,
-                  ),
-                  SizedBox(height: isMobile ? 12 : 16),
-                  Text(
-                    'No nodes added to this map yet.',
-                    style: TextStyle(
-                      fontSize: isMobile ? 16 : 18,
-                      color: Colors.grey[600],
+                  // Leading CircleAvatar
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: CircleAvatar(
+                      backgroundColor: _isConnectionMode && nodeId == _selectedStartNodeId
+                          ? Colors.orange
+                          : Colors.blue,
+                      radius: 14,
+                      child: Text(
+                        (index + 1).toString(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                    textAlign: TextAlign.center,
                   ),
-                  SizedBox(height: isMobile ? 8 : 12),
-                  Text(
-                    'Tap the + button to add your first node.',
-                    style: TextStyle(
-                      fontSize: isMobile ? 14 : 16,
-                      color: Colors.grey[500],
+
+                  // Title and subtitle - takes remaining space
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 8.0,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            nodeName,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Node ${index + 1}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    textAlign: TextAlign.center,
+                  ),
+
+                  // Trailing buttons - super simple and compact
+                  Container(
+                    width: 50,
+                    child: _isConnectionMode
+                      ? const Icon(
+                          Icons.touch_app,
+                          color: Colors.orange,
+                          size: 16,
+                        )
+                      : PopupMenuButton<String>(
+                          icon: Icon(
+                            Icons.more_vert,
+                            size: 16,
+                            color: Colors.grey[600],
+                          ),
+                          padding: EdgeInsets.zero,
+                          onSelected: (value) {
+                            if (value == 'edit') {
+                              _navigateToNodeCapture(nodeId: nodeId);
+                            } else if (value == 'delete') {
+                              _deleteNode(nodeId, nodeName);
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            PopupMenuItem(
+                              value: 'edit',
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.edit, size: 16, color: Colors.blue),
+                                  SizedBox(width: 8),
+                                  Text('Edit'),
+                                ],
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.delete, size: 16, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Delete'),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
                   ),
                 ],
               ),
             ),
-          );
-        }
-
-        return ListView.builder(
-          padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
-          itemCount: nodes.length,
-          itemBuilder: (context, index) {
-            final node = nodes[index];
-            final nodeName = node['name'] ?? 'Unnamed Node';
-            final nodeId = node['id'];
-
-            return Card(
-              margin: EdgeInsets.symmetric(
-                vertical: isMobile ? 2.0 : 4.0,
-                horizontal: isMobile ? 2.0 : 6.0,
-              ),
-              elevation: 2,
-              child: InkWell(
-                onTap: _isConnectionMode 
-                  ? () => _onNodeTapped(nodeId, nodeName)
-                  : null,
-                child: IntrinsicHeight(
-                  child: Row(
-                    children: [
-                      // Leading CircleAvatar
-                      Padding(
-                        padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
-                        child: CircleAvatar(
-                          backgroundColor: _isConnectionMode && nodeId == _selectedStartNodeId
-                              ? Colors.orange
-                              : Colors.blue,
-                          radius: isMobile ? 14 : 16,
-                          child: Text(
-                            (index + 1).toString(),
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: isMobile ? 9 : 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
-                      
-                      // Title and subtitle - takes remaining space
-                      Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(
-                            vertical: isMobile ? 8.0 : 12.0,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Text(
-                                nodeName,
-                                style: TextStyle(
-                                  fontSize: isMobile ? 12 : 14,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                                maxLines: 1,
-                              ),
-                              if (!isMobile) ...[
-                                SizedBox(height: 2),
-                                Text(
-                                  'Node ${index + 1}',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ),
-                      
-                      // Trailing buttons - super simple and compact
-                      Container(
-                        width: isMobile ? 50 : 76,
-                        child: _isConnectionMode 
-                          ? Icon(
-                              Icons.touch_app,
-                              color: Colors.orange,
-                              size: isMobile ? 16 : 20,
-                            )
-                          : PopupMenuButton<String>(
-                              icon: Icon(
-                                Icons.more_vert,
-                                size: isMobile ? 16 : 18,
-                                color: Colors.grey[600],
-                              ),
-                              padding: EdgeInsets.zero,
-                              onSelected: (value) {
-                                if (value == 'edit') {
-                                  _navigateToNodeCapture(nodeId: nodeId);
-                                } else if (value == 'delete') {
-                                  _deleteNode(nodeId, nodeName);
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                PopupMenuItem(
-                                  value: 'edit',
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.edit, size: 16, color: Colors.blue),
-                                      SizedBox(width: 8),
-                                      Text('Edit'),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: 'delete',
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.delete, size: 16, color: Colors.red),
-                                      SizedBox(width: 8),
-                                      Text('Delete'),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
+          ),
         );
       },
     );
@@ -1076,15 +980,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                     style: TextStyle(
                       fontSize: isMobile ? 16 : 18,
                       color: Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  SizedBox(height: isMobile ? 8 : 12),
-                  Text(
-                    'Use Connection Mode to create paths between nodes.',
-                    style: TextStyle(
-                      fontSize: isMobile ? 14 : 16,
-                      color: Colors.grey[500],
                     ),
                     textAlign: TextAlign.center,
                   ),
@@ -1140,19 +1035,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                 subtitle: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (connection['distance_meters'] != null) ...[
-                      SizedBox(height: 4),
-                      Text(
-                        'Distance: ${connection['distance_meters'].toStringAsFixed(1)}m',
-                        style: TextStyle(fontSize: isMobile ? 12 : 13),
-                      ),
-                    ],
-                    if (connection['steps'] != null) ...[
-                      Text(
-                        'Steps: ${connection['steps']}',
-                        style: TextStyle(fontSize: isMobile ? 12 : 13),
-                      ),
-                    ],
                     if (connection['custom_instruction'] != null) ...[
                       Text(
                         'Note: ${connection['custom_instruction']}',
@@ -1217,13 +1099,13 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
       top: displayY - 15,
       child: GestureDetector(
         onTap: () => _onNodeTapped(nodeId, node['name'] ?? 'Node $index'),
-      child: Tooltip(
+        child: Tooltip(
           message: node['name'] ?? 'Node $index',
           child: Container(
             width: 30,
             height: 30,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
               color: isSelected ? Colors.orange : Colors.blue,
               border: Border.all(
                 color: Colors.white,
@@ -1234,18 +1116,18 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   color: Colors.black.withOpacity(0.3),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
-            ),
+                ),
               ],
             ),
             child: Center(
               child: Text(
-              '$index',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
+                '$index',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
             ),
           ),
         ),
@@ -1330,19 +1212,6 @@ class MapWithConnectionsPainter extends CustomPainter {
         final double angle = atan2(y2 - y1, x2 - x1);
         
         _drawArrow(canvas, Offset(midX, midY), angle, connectionPaint);
-        
-        // Draw connection type label
-        String typeLabel = 'PATH';
-        if (connection['distance_meters'] != null) {
-          typeLabel = '$typeLabel (${connection['distance_meters'].toStringAsFixed(1)}m)';
-        }
-        
-        _drawDistanceLabel(
-          canvas, 
-          Offset(midX, midY - 20), 
-          typeLabel,
-          isSelected,
-        );
       }
     }
   }
@@ -1366,53 +1235,6 @@ class MapWithConnectionsPainter extends CustomPainter {
     arrowPath.close();
     
     canvas.drawPath(arrowPath, paint..style = PaintingStyle.fill);
-  }
-
-  void _drawDistanceLabel(Canvas canvas, Offset position, String text, bool isSelected) {
-    final textPainter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          color: isSelected ? Colors.red : Colors.blue,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          shadows: [
-            Shadow(
-              offset: Offset(1, 1),
-              blurRadius: 2,
-              color: Colors.white,
-            ),
-          ],
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    );
-    
-    textPainter.layout();
-    
-    // Draw background
-    final backgroundPaint = Paint()
-      ..color = Colors.white.withOpacity(0.8)
-      ..style = PaintingStyle.fill;
-    
-    final backgroundRect = Rect.fromCenter(
-      center: position,
-      width: textPainter.width + 8,
-      height: textPainter.height + 4,
-    );
-    
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(backgroundRect, Radius.circular(4)),
-      backgroundPaint,
-    );
-    
-    textPainter.paint(
-      canvas,
-      Offset(
-        position.dx - textPainter.width / 2,
-        position.dy - textPainter.height / 2,
-      ),
-    );
   }
 
   @override
@@ -1488,14 +1310,6 @@ class ConnectionDialog extends StatelessWidget {
                       borderRadius: BorderRadius.circular(isMobile ? 8 : 12),
                     ),
                   ),
-                ),
-              ),
-              SizedBox(height: isMobile ? 6 : 8),
-              Text(
-                'Walk the path to automatically record distance, steps, and visual landmarks. A connection line will appear after recording.',
-                style: TextStyle(
-                  fontSize: isMobile ? 11 : 12,
-                  color: Colors.grey[600],
                 ),
               ),
             ],

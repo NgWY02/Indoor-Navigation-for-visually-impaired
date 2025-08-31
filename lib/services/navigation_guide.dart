@@ -199,7 +199,7 @@ class NavigationGuide {
         break;
       case TurnType.uTurn:
         turnText = "Make a U-turn";
-        instructionType = InstructionType.turnLeft; // Default to left for U-turn
+        instructionType = InstructionType.turnLeft;
         break;
       case TurnType.straight:
         turnText = "Continue straight";
