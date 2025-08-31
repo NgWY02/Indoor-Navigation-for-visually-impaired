@@ -245,7 +245,7 @@ class _MyAppState extends State<MyApp> {
       // Use AuthWrapper for proper authentication flow
       home: AuthWrapper(cameras: widget.cameras),
       routes: {
-        '/admin': (context) => const AdminPanel(),
+        '/admin': (context) => AdminPanel(cameras: widget.cameras),
         '/profile': (context) => const ProfileScreen(),
         '/admin_home': (context) => AdminHomeScreen(cameras: widget.cameras),
         '/image_test': (context) => const ImageTestScreen(),

@@ -24,7 +24,6 @@ class LocationMatch {
 class PositionLocalizationService {
   final ClipService _clipService;
   final SupabaseService _supabaseService;
-  final Function(String debugInfo)? onDebugUpdate;
   
   // Configuration
   static const double _minimumConfidenceThreshold = 0.6;
@@ -39,7 +38,6 @@ class PositionLocalizationService {
   PositionLocalizationService({
     required ClipService clipService,
     required SupabaseService supabaseService,
-    this.onDebugUpdate,
   }) : _clipService = clipService, _supabaseService = supabaseService;
 
   /// Start continuous sampling for position localization

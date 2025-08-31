@@ -1,12 +1,15 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:camera/camera.dart';
 import '../../services/supabase_service.dart';
 import 'node_capture.dart';
-import 'map_details_screen.dart'; 
+import 'map_details_screen.dart';
 
 class MapManagement extends StatefulWidget {
-  const MapManagement({Key? key}) : super(key: key);
+  final List<CameraDescription> cameras;
+  
+  const MapManagement({Key? key, required this.cameras}) : super(key: key);
 
   @override
   _MapManagementState createState() => _MapManagementState();
@@ -226,310 +229,43 @@ class _MapManagementState extends State<MapManagement> {
   
   @override
   Widget build(BuildContext context) {
-    final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
-    final isWideScreen = screenWidth > 600;
-    final isTablet = screenWidth > 800;
-    
-    // Calculate responsive padding based on screen size and system UI
-    final horizontalPadding = isTablet ? 32.0 : (isWideScreen ? 24.0 : 16.0);
-    final verticalPadding = isTablet ? 24.0 : 16.0;
-    final bottomSafeArea = mediaQuery.padding.bottom;
-    final hasBottomNavigation = bottomSafeArea > 0;
-    
+    final screenSize = MediaQuery.of(context).size;
+    final isSmallScreen = screenSize.width < 360;
+    final isLargeScreen = screenSize.width > 480;
+    final horizontalPadding = isSmallScreen ? 12.0 : isLargeScreen ? 24.0 : 16.0;
+    final verticalPadding = isSmallScreen ? 8.0 : 16.0;
+
     return Scaffold(
       appBar: AppBar(
-        backgroundColor: Theme.of(context).primaryColor, 
+        backgroundColor: Theme.of(context).primaryColor,
         foregroundColor: Colors.white,
         title: Text(
           'Map Management',
           style: TextStyle(
-            fontSize: isTablet ? 22 : 20,
+            fontSize: isSmallScreen ? 18 : 20,
           ),
         ),
       ),
       body: SafeArea(
-        child: _isLoading 
+        child: _isLoading
             ? const Center(child: CircularProgressIndicator())
-            : LayoutBuilder(
-                builder: (context, constraints) {
-                  if (isWideScreen && !_isAddingMap) {
-                    // Wide screen layout: side-by-side for tablets/desktop
-                    return _buildWideScreenLayout(constraints, horizontalPadding, verticalPadding);
-                  } else {
-                    // Mobile layout: single column with bottom navigation awareness
-                    return _buildMobileLayout(horizontalPadding, verticalPadding, hasBottomNavigation);
-                  }
-                },
-              ),
-      ),
-    );
-  }
-
-  Widget _buildMobileLayout(double horizontalPadding, double verticalPadding, bool hasBottomNavigation) {
-    return SingleChildScrollView(
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: horizontalPadding,
-          right: horizontalPadding,
-          top: verticalPadding,
-          bottom: hasBottomNavigation ? verticalPadding + 16 : verticalPadding,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: _buildMainContent(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildWideScreenLayout(BoxConstraints constraints, double horizontalPadding, double verticalPadding) {
-    return Row(
-      children: [
-        // Left panel: Map list (1/3 width)
-        Expanded(
-          flex: 1,
-          child: Container(
-            margin: EdgeInsets.only(
-              left: horizontalPadding,
-              top: verticalPadding,
-              bottom: verticalPadding,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Title section
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Available Maps',
-                      style: TextStyle(
-                        fontSize: constraints.maxWidth > 1000 ? 22 : 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    ElevatedButton.icon(
-                      icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-                      label: const Text('Add Map'),
-                      onPressed: () {
-                        setState(() {
-                          _isAddingMap = true;
-                          _errorMessage = null;
-                        });
-                      },
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-                        textStyle: const TextStyle(fontSize: 14),
-                      ),
-                    ),
-                  ],
+            : SingleChildScrollView(
+                padding: EdgeInsets.symmetric(
+                  horizontal: horizontalPadding,
+                  vertical: verticalPadding,
                 ),
-                const SizedBox(height: 16),
-                
-                // Error message
-                if (_errorMessage != null)
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      _errorMessage!,
-                      style: TextStyle(color: Colors.red.shade900),
-                    ),
-                  ),
-                
-                // Maps list
-                Expanded(
-                  child: _maps.isEmpty
-                      ? const Center(
-                          child: Text(
-                            'No maps available.\nAdd your first map!',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Colors.grey,
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          itemCount: _maps.length,
-                          itemBuilder: (context, index) {
-                            final map = _maps[index];
-                            final bool isSelected = _selectedMap != null && _selectedMap!['id'] == map['id'];
-                            
-                            return Card(
-                              margin: const EdgeInsets.symmetric(vertical: 4.0),
-                              elevation: isSelected ? 4 : 2,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12.0),
-                                side: isSelected
-                                    ? BorderSide(color: Theme.of(context).primaryColor, width: 2)
-                                    : BorderSide.none,
-                              ),
-                              child: ListTile(
-                                title: Text(
-                                  map['name'] ?? 'Unnamed Map',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: constraints.maxWidth > 1000 ? 16 : 15,
-                                  ),
-                                ),
-                                subtitle: Text('${map['node_count'] ?? 0} nodes'),
-                                selected: isSelected,
-                                selectedTileColor: Theme.of(context).primaryColor.withOpacity(0.1),
-                                onTap: () => _selectMap(map),
-                                trailing: isSelected 
-                                    ? Icon(Icons.check_circle, color: Theme.of(context).primaryColor) 
-                                    : null,
-                              ),
-                            );
-                          },
-                        ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: _buildMainContent(isSmallScreen, isLargeScreen),
                 ),
-              ],
-            ),
-          ),
-        ),
-        
-        // Divider
-        Container(
-          width: 1,
-          color: Colors.grey[300],
-          margin: const EdgeInsets.symmetric(vertical: 16),
-        ),
-        
-        // Right panel: Map details/actions (2/3 width)
-        Expanded(
-          flex: 2,
-          child: Container(
-            padding: EdgeInsets.only(
-              left: horizontalPadding,
-              right: horizontalPadding,
-              top: verticalPadding,
-              bottom: verticalPadding,
-            ),
-            child: _selectedMap != null
-                ? _buildMapDetailsPanel(constraints)
-                : Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.map_outlined,
-                          size: constraints.maxWidth > 1000 ? 80 : 64,
-                          color: Colors.grey[400],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Select a map to view details and actions',
-                          style: TextStyle(
-                            fontSize: constraints.maxWidth > 1000 ? 18 : 16,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMapDetailsPanel(BoxConstraints constraints) {
-    if (_selectedMap == null) return const SizedBox.shrink();
-    
-    final isLargeScreen = constraints.maxWidth > 1000;
-    
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _selectedMap!['name'] ?? 'Unnamed Map',
-            style: TextStyle(
-              fontSize: isLargeScreen ? 28 : 24,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '${_selectedMap!['node_count'] ?? 0} nodes',
-            style: TextStyle(
-              fontSize: isLargeScreen ? 18 : 16,
-              color: Colors.grey[600],
-            ),
-          ),
-          const SizedBox(height: 32),
-          
-          // Action buttons with responsive sizing
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildActionButton(
-                onPressed: _addNodeToMap,
-                icon: Icons.add_location,
-                label: 'Add Node',
-                color: Theme.of(context).primaryColor,
-                isLargeScreen: isLargeScreen,
               ),
-              const SizedBox(height: 16),
-              _buildActionButton(
-                onPressed: _viewMapDetails,
-                icon: Icons.manage_search,
-                label: 'View Details',
-                color: Colors.teal,
-                isLargeScreen: isLargeScreen,
-              ),
-              const SizedBox(height: 16),
-              _buildActionButton(
-                onPressed: () => _confirmDeleteMap(_selectedMap!),
-                icon: Icons.delete_forever,
-                label: 'Delete Map',
-                color: Colors.red[700]!,
-                isLargeScreen: isLargeScreen,
-              ),
-            ],
-          ),
-        ],
       ),
     );
   }
 
-  Widget _buildActionButton({
-    required VoidCallback onPressed,
-    required IconData icon,
-    required String label,
-    required Color color,
-    required bool isLargeScreen,
-  }) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: isLargeScreen ? 24 : 20),
-      label: Text(
-        label,
-        style: TextStyle(fontSize: isLargeScreen ? 16 : 14),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: Colors.white,
-        padding: EdgeInsets.symmetric(
-          vertical: isLargeScreen ? 20 : 16,
-          horizontal: isLargeScreen ? 24 : 16,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        elevation: 2,
-      ),
-    );
-  }
 
-  List<Widget> _buildMainContent() {
+
+  List<Widget> _buildMainContent(bool isSmallScreen, bool isLargeScreen) {
     return [
       // Error message (show only when not adding)
       if (_errorMessage != null && !_isAddingMap)
@@ -559,17 +295,17 @@ class _MapManagementState extends State<MapManagement> {
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(
+          Text(
             'Available Maps',
             style: TextStyle(
-              fontSize: 20.0,
+              fontSize: isSmallScreen ? 18.0 : 20.0,
               fontWeight: FontWeight.bold,
             ),
           ),
           if (!_isAddingMap)
             ElevatedButton.icon(
-              icon: const Icon(Icons.add_photo_alternate_outlined, size: 18),
-              label: const Text('Upload New Map'),
+              icon: Icon(Icons.add_photo_alternate_outlined, size: isSmallScreen ? 16 : 18),
+              label: Text(isSmallScreen ? 'Add Map' : 'Upload New Map'),
               onPressed: () {
                 setState(() {
                   _isAddingMap = true;
@@ -577,7 +313,10 @@ class _MapManagementState extends State<MapManagement> {
                 });
               },
               style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSmallScreen ? 12.0 : 16.0,
+                  vertical: isSmallScreen ? 10.0 : 12.0,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -589,13 +328,13 @@ class _MapManagementState extends State<MapManagement> {
 
       // Conditionally Display Map List OR Add Form
       if (!_isAddingMap)
-        ..._buildMapsList()
+        ..._buildMapsList(isSmallScreen, isLargeScreen)
       else
-        _buildAddMapForm(),
+        _buildAddMapForm(isSmallScreen, isLargeScreen),
     ];
   }
 
-  List<Widget> _buildMapsList() {
+  List<Widget> _buildMapsList(bool isSmallScreen, bool isLargeScreen) {
     if (_maps.isEmpty) {
       return [
         Center(
@@ -605,23 +344,23 @@ class _MapManagementState extends State<MapManagement> {
               children: [
                 Icon(
                   Icons.map_outlined,
-                  size: 64,
+                  size: isSmallScreen ? 48 : 64,
                   color: Colors.grey[400],
                 ),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'No maps available',
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: isSmallScreen ? 16 : 18,
                     fontWeight: FontWeight.bold,
                     color: Colors.grey,
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
+                Text(
                   'Add your first map to get started!',
                   style: TextStyle(
-                    fontSize: 14,
+                    fontSize: isSmallScreen ? 12 : 14,
                     color: Colors.grey,
                   ),
                 ),
@@ -654,7 +393,7 @@ class _MapManagementState extends State<MapManagement> {
               onTap: () => _selectMap(map),
               borderRadius: BorderRadius.circular(12.0),
               child: Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: EdgeInsets.all(isSmallScreen ? 12.0 : 16.0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -663,9 +402,9 @@ class _MapManagementState extends State<MapManagement> {
                         Expanded(
                           child: Text(
                             map['name'] ?? 'Unnamed Map',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: 18,
+                              fontSize: isSmallScreen ? 16 : 18,
                             ),
                           ),
                         ),
@@ -679,67 +418,104 @@ class _MapManagementState extends State<MapManagement> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
+                        Icon(Icons.location_on, size: isSmallScreen ? 14 : 16, color: Colors.grey[600]),
                         const SizedBox(width: 4),
                         Text(
                           '${map['node_count'] ?? 0} nodes',
-                          style: TextStyle(color: Colors.grey[600]),
+                          style: TextStyle(color: Colors.grey[600], fontSize: isSmallScreen ? 12 : 14),
                         ),
                       ],
                     ),
                     if (isSelected) ...[
                       const SizedBox(height: 16),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final isNarrow = constraints.maxWidth < 400;
-                          
-                          if (isNarrow) {
-                            // Stacked layout for narrow screens
-                            return Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        onPressed: _addNodeToMap,
-                                        icon: const Icon(Icons.add_location, size: 18),
-                                        label: const Text('Add Node'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Theme.of(context).primaryColor,
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        onPressed: _viewMapDetails,
-                                        icon: const Icon(Icons.manage_search, size: 18),
-                                        label: const Text('Details'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.teal,
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
+                      // Responsive action buttons for phones
+                      if (isSmallScreen)
+                        // Single column layout for very small screens
+                        Column(
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _addNodeToMap,
+                                icon: const Icon(Icons.add_location, size: 18),
+                                label: const Text('Add Node'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Theme.of(context).primaryColor,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
                                 ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: _viewMapDetails,
+                                icon: const Icon(Icons.manage_search, size: 18),
+                                label: const Text('Details'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _confirmDeleteMap(map),
+                                icon: const Icon(Icons.delete_forever, size: 18),
+                                label: const Text('Delete Map'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red[700],
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      else
+                        // Two-column layout for larger phones
+                        Column(
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
                                   child: ElevatedButton.icon(
-                                    onPressed: () => _confirmDeleteMap(map),
-                                    icon: const Icon(Icons.delete_forever, size: 18),
-                                    label: const Text('Delete Map'),
+                                    onPressed: _addNodeToMap,
+                                    icon: const Icon(Icons.add_location, size: 18),
+                                    label: const Text('Add Node'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red[700],
+                                      backgroundColor: Theme.of(context).primaryColor,
                                       foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: _viewMapDetails,
+                                    icon: const Icon(Icons.manage_search, size: 18),
+                                    label: const Text('Details'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.teal,
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(8),
                                       ),
@@ -747,65 +523,26 @@ class _MapManagementState extends State<MapManagement> {
                                   ),
                                 ),
                               ],
-                            );
-                          } else {
-                            // Row layout for wider screens
-                            return Column(
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        onPressed: _addNodeToMap,
-                                        icon: const Icon(Icons.add_location),
-                                        label: const Text('Add Node'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Theme.of(context).primaryColor,
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: ElevatedButton.icon(
-                                        onPressed: _viewMapDetails,
-                                        icon: const Icon(Icons.manage_search),
-                                        label: const Text('View Details'),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.teal,
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  width: double.infinity,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => _confirmDeleteMap(map),
-                                    icon: const Icon(Icons.delete_forever),
-                                    label: const Text('Delete Map'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red[700],
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _confirmDeleteMap(map),
+                                icon: const Icon(Icons.delete_forever, size: 18),
+                                label: const Text('Delete Map'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red[700],
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
                                   ),
                                 ),
-                              ],
-                            );
-                          }
-                        },
-                      ),
+                              ),
+                            ),
+                          ],
+                        ),
                     ],
                   ],
                 ),
@@ -818,24 +555,24 @@ class _MapManagementState extends State<MapManagement> {
     ];
   }
 
-  Widget _buildAddMapForm() {
+  Widget _buildAddMapForm(bool isSmallScreen, bool isLargeScreen) {
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(20.0),
+        padding: EdgeInsets.all(isSmallScreen ? 16.0 : 20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
+                Text(
                   'Add New Map',
                   style: TextStyle(
-                    fontSize: 20.0,
+                    fontSize: isSmallScreen ? 18.0 : 20.0,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -850,7 +587,7 @@ class _MapManagementState extends State<MapManagement> {
                 ),
               ],
             ),
-            const SizedBox(height: 20.0),
+            SizedBox(height: isSmallScreen ? 16.0 : 20.0),
             
             // Form error message
             if (_errorMessage != null)
@@ -869,7 +606,7 @@ class _MapManagementState extends State<MapManagement> {
                     Expanded(
                       child: Text(
                         _errorMessage!,
-                        style: TextStyle(color: Colors.red.shade900),
+                        style: TextStyle(color: Colors.red.shade900, fontSize: isSmallScreen ? 12 : 14),
                       ),
                     ),
                   ],
@@ -885,103 +622,101 @@ class _MapManagementState extends State<MapManagement> {
                 ),
                 hintText: 'e.g., 1st Floor, Building A',
                 prefixIcon: const Icon(Icons.map),
+                contentPadding: EdgeInsets.symmetric(
+                  horizontal: isSmallScreen ? 12 : 16,
+                  vertical: isSmallScreen ? 12 : 16,
+                ),
               ),
             ),
-            const SizedBox(height: 20.0),
+            SizedBox(height: isSmallScreen ? 16.0 : 20.0),
             
-            // Responsive image picker
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final maxImageHeight = constraints.maxWidth > 600 ? 400.0 : 300.0;
-                
-                return Center(
-                  child: _mapImage != null
-                      ? Stack(
-                          alignment: Alignment.topRight,
-                          children: [
-                            Container(
-                              constraints: BoxConstraints(
-                                maxHeight: maxImageHeight,
-                                maxWidth: constraints.maxWidth - 32,
-                              ),
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withOpacity(0.1),
-                                    blurRadius: 8,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.file(
-                                  _mapImage!,
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 8,
-                              right: 8,
-                              child: IconButton(
-                                icon: const Icon(Icons.close, color: Colors.white),
-                                onPressed: () => setState(() => _mapImage = null),
-                                style: IconButton.styleFrom(
-                                  backgroundColor: Colors.black54,
-                                  shape: const CircleBorder(),
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Container(
-                          height: 200,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: Colors.grey[400]!,
-                              width: 2,
-                              style: BorderStyle.solid,
-                            ),
-                            borderRadius: BorderRadius.circular(12),
-                            color: Colors.grey[50],
+            // Responsive image display for phones
+            Center(
+              child: _mapImage != null
+                  ? Stack(
+                      alignment: Alignment.topRight,
+                      children: [
+                        Container(
+                          constraints: BoxConstraints(
+                            maxHeight: isSmallScreen ? 200.0 : isLargeScreen ? 350.0 : 280.0,
+                            maxWidth: MediaQuery.of(context).size.width - 32,
                           ),
-                          child: InkWell(
-                            onTap: _pickImage,
+                          decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(12),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.upload_file,
-                                  size: 64,
-                                  color: Colors.grey[600],
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'Select Map Image',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.grey[700],
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  'Tap to browse files',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey[500],
-                                  ),
-                                ),
-                              ],
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 8,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.file(
+                              _mapImage!,
+                              fit: BoxFit.contain,
                             ),
                           ),
                         ),
-                );
-              },
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white),
+                            onPressed: () => setState(() => _mapImage = null),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.black54,
+                              shape: const CircleBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Container(
+                      height: isSmallScreen ? 150 : 200,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: Colors.grey[400]!,
+                          width: 2,
+                          style: BorderStyle.solid,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.grey[50],
+                      ),
+                      child: InkWell(
+                        onTap: _pickImage,
+                        borderRadius: BorderRadius.circular(12),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.upload_file,
+                              size: isSmallScreen ? 48 : 64,
+                              color: Colors.grey[600],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Select Map Image',
+                              style: TextStyle(
+                                fontSize: isSmallScreen ? 14 : 16,
+                                fontWeight: FontWeight.w500,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Tap to browse files',
+                              style: TextStyle(
+                                fontSize: isSmallScreen ? 12 : 14,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
             ),
             const SizedBox(height: 24.0),
             
@@ -990,7 +725,7 @@ class _MapManagementState extends State<MapManagement> {
               child: ElevatedButton(
                 onPressed: _isLoading ? null : (_mapImage != null ? _saveMap : _pickImage),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16.0),
+                  padding: EdgeInsets.symmetric(vertical: isSmallScreen ? 14.0 : 16.0),
                   backgroundColor: Theme.of(context).primaryColor,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
@@ -999,18 +734,18 @@ class _MapManagementState extends State<MapManagement> {
                   elevation: 2,
                 ),
                 child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
+                    ? SizedBox(
+                        height: isSmallScreen ? 18 : 20,
+                        width: isSmallScreen ? 18 : 20,
+                        child: const CircularProgressIndicator(
                           strokeWidth: 3,
                           color: Colors.white,
                         ),
                       )
                     : Text(
                         _mapImage != null ? 'Save Map' : 'Select Map Image',
-                        style: const TextStyle(
-                          fontSize: 16,
+                        style: TextStyle(
+                          fontSize: isSmallScreen ? 14 : 16,
                           fontWeight: FontWeight.w600,
                         ),
                       ),

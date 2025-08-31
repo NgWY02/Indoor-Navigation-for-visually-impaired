@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../services/supabase_service.dart';
 import 'map_management.dart';
+import 'package:camera/camera.dart';
 
 class AdminPanel extends StatefulWidget {
-  const AdminPanel({Key? key}) : super(key: key);
+  final List<CameraDescription> cameras;
+  
+  const AdminPanel({Key? key, required this.cameras}) : super(key: key);
 
   @override
   _AdminPanelState createState() => _AdminPanelState();
@@ -82,7 +85,7 @@ class _AdminPanelState extends State<AdminPanel> {
   void _navigateToMapManagement() {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => const MapManagement(),
+        builder: (context) => MapManagement(cameras: widget.cameras),
       ),
     );
   }
@@ -98,7 +101,7 @@ class _AdminPanelState extends State<AdminPanel> {
           // Admin actions section
           Container(
             padding: const EdgeInsets.all(16.0),
-            color: Theme.of(context).primaryColor.withOpacity(0.1),
+            color: Theme.of(context).primaryColor.withValues(alpha: 0.1),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

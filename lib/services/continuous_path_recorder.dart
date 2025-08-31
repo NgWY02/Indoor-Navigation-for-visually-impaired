@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:pedometer/pedometer.dart';
 import '../services/clip_service.dart';
 import '../models/path_models.dart';
 import 'package:uuid/uuid.dart';
@@ -45,14 +44,6 @@ class ContinuousPathRecorder {
   List<RawWaypointData> _rawWaypoints = []; // Store raw frames for batch processing
   Timer? _recordingTimer;
   StreamSubscription<CompassEvent>? _compassSubscription;
-  
-  // 🚶 STEP COUNTER: Real distance tracking
-  StreamSubscription<StepCount>? _stepCountSubscription;
-  StreamSubscription<PedestrianStatus>? _pedestrianStatusSubscription;
-  int _stepsAtLastWaypoint = 0;
-  int _currentTotalSteps = 0;
-  bool _isUserWalking = false;
-  static const double _averageStrideLength = 0.7; // meters per step
   
   // Tracking variables
   double _lastHeading = 0.0;
@@ -105,18 +96,10 @@ class ContinuousPathRecorder {
       _sequenceNumber = 0;
       _recordingStartTime = DateTime.now();
       
-      // 🚶 Reset step counter state for new recording
-      _stepsAtLastWaypoint = 0; // Will be set by first step counter reading
-      _currentTotalSteps = 0;
-      _isUserWalking = false;
-      
       onStatusUpdate?.call('Starting path recording...');
       
       // Initialize compass
       await _initializeCompass();
-      
-      // 🚶 Initialize step counter for real distance tracking
-      await _initializeStepCounter();
       
       // Start periodic recording
       _recordingTimer = Timer.periodic(_captureInterval, (timer) {
@@ -156,12 +139,6 @@ class ContinuousPathRecorder {
     
     _compassSubscription?.cancel();
     _compassSubscription = null;
-    
-    _stepCountSubscription?.cancel();
-    _stepCountSubscription = null;
-    
-    _pedestrianStatusSubscription?.cancel();
-    _pedestrianStatusSubscription = null;
 
     print('✅ All timers cancelled, processing waypoints...');
     onStatusUpdate?.call('Recording stopped. Processing ${_rawWaypoints.length} captured frames...');
@@ -204,47 +181,6 @@ class ContinuousPathRecorder {
     
     // Capture a waypoint immediately with custom description
     _captureWaypoint(manualDescription: description);
-  }
-
-  /// 🚶 Initialize step counter for real distance measurement
-  Future<void> _initializeStepCounter() async {
-    try {
-      // Initialize step counting stream
-      _stepCountSubscription = Pedometer.stepCountStream.listen(
-        (StepCount event) {
-          _currentTotalSteps = event.steps;
-          print('Recording - Total steps: $_currentTotalSteps');
-          
-          // Set baseline on first step count reading (not immediately)
-          if (_stepsAtLastWaypoint == 0) {
-            _stepsAtLastWaypoint = _currentTotalSteps;
-            print('🎯 Step baseline set on first reading: $_stepsAtLastWaypoint steps');
-          }
-        },
-        onError: (error) {
-          print('Step counter error during recording: $error');
-          onError?.call('Step counter unavailable. Using time-based distance estimation.');
-        },
-      );
-
-      // Initialize pedestrian status detection
-      _pedestrianStatusSubscription = Pedometer.pedestrianStatusStream.listen(
-        (PedestrianStatus event) {
-          _isUserWalking = (event.status == 'walking');
-          print('Recording - Walking status: ${_isUserWalking ? "WALKING" : "STOPPED"}');
-        },
-        onError: (error) {
-          print('Pedestrian status error during recording: $error');
-        },
-      );
-
-      // DON'T set baseline here - wait for first step count reading
-      print('Step counter stream initialized - waiting for first reading...');
-      
-    } catch (e) {
-      print('Failed to initialize step counter during recording: $e');
-      onError?.call('Step counter unavailable. Recording will use time-based distance estimation.');
-    }
   }
 
   // Private methods
@@ -311,36 +247,8 @@ class ContinuousPathRecorder {
       
       final File imageFile = File(image.path);
       
-      // Calculate REAL distance from previous waypoint using step counter
-      double? distanceFromPrevious;
-      if (_waypoints.isNotEmpty) {
-        print('DISTANCE DEBUG:');
-        print('Current total steps: $_currentTotalSteps');
-        print('Steps at last waypoint: $_stepsAtLastWaypoint');
-        
-        // Check if step counter baseline has been established
-        if (_stepsAtLastWaypoint > 0 && _currentTotalSteps > 0) {
-          final stepsSinceLastWaypoint = _currentTotalSteps - _stepsAtLastWaypoint;
-          print('   Steps since last waypoint: $stepsSinceLastWaypoint');
-          
-          if (stepsSinceLastWaypoint > 0) {
-            // Real step-based distance calculation
-            distanceFromPrevious = stepsSinceLastWaypoint * _averageStrideLength;
-            print('REAL distance: ${stepsSinceLastWaypoint} steps = ${distanceFromPrevious.toStringAsFixed(1)}m');
-            
-            // Update baseline for next waypoint
-            _stepsAtLastWaypoint = _currentTotalSteps;
-          } else {
-            // No steps since last waypoint - user might be standing still
-            distanceFromPrevious = 0.5; // Very small distance for stationary waypoints
-            print('No movement detected - using minimal distance: ${distanceFromPrevious}m');
-          }
-        } else {
-          // Step counter not ready yet - use time-based fallback
-          distanceFromPrevious = _captureInterval.inSeconds * 1.2;
-          print('Step counter not ready, using time-based estimation: ${distanceFromPrevious.toStringAsFixed(1)}m');
-        }
-      }
+      // Distance calculation removed - not reliable
+      double? distanceFromPrevious = null;
 
       // Create raw waypoint data (no embedding yet)
       final rawWaypoint = RawWaypointData(
@@ -359,10 +267,8 @@ class ContinuousPathRecorder {
       _rawWaypoints.add(rawWaypoint);
       _lastHeading = _normalizeHeading(_currentHeading!);
       
-      // Don't delete image - we need it for batch processing!
-      
       // Update status
-      String statusMessage = 'Frame ${_rawWaypoints.length} captured.';
+      String statusMessage = 'Waypoint ${_rawWaypoints.length} captured.';
       if (isDecisionPoint) {
         statusMessage += ' (${turnType.name} turn detected)';
       }
@@ -446,7 +352,7 @@ class ContinuousPathRecorder {
       
       try {
         // Update status
-        onStatusUpdate?.call('Processing frame ${i + 1}/${_rawWaypoints.length} (detecting people + inpainting)...');
+        onStatusUpdate?.call('Processing frame ${i + 1}/${_rawWaypoints.length}');
         
         // Run people detection and embedding generation in parallel
         final File imageFile = File(rawWaypoint.imagePath);
@@ -612,8 +518,8 @@ class ContinuousPathRecorder {
     double estimatedDistance = _waypoints.fold(0.0, (sum, waypoint) =>
         sum + (waypoint.distanceFromPrevious ?? 0.0));
     
-    // 🚶 Proper step calculation: distance ÷ stride length
-    int estimatedSteps = (estimatedDistance / _averageStrideLength).round();
+    // Step calculation removed - not reliable
+    int estimatedSteps = 0;
     
     return NavigationPath(
       id: _currentPathId ?? _uuid.v4(),
@@ -631,7 +537,5 @@ class ContinuousPathRecorder {
   void dispose() {
     _recordingTimer?.cancel();
     _compassSubscription?.cancel();
-    _stepCountSubscription?.cancel();
-    _pedestrianStatusSubscription?.cancel();
   }
 }

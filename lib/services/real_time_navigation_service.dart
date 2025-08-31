@@ -33,10 +33,6 @@ class RealTimeNavigationService {
   // STEP COUNTER SOLUTION: Movement validation with REAL distances
   StreamSubscription<StepCount>? _stepCountSubscription;
   StreamSubscription<PedestrianStatus>? _pedestrianStatusSubscription;
-  int _stepsAtLastWaypoint = 0;
-  int _currentTotalSteps = 0;
-
-  bool _isUserWalking = false;
   // Note: Now uses real step-based distances from path recording
   
   // Tracking
@@ -65,7 +61,7 @@ class RealTimeNavigationService {
   final Function(String message)? onStatusUpdate;
   final Function(NavigationInstruction instruction)? onInstructionUpdate;
   final Function(String error)? onError;
-  final Function(String debugInfo)? onDebugUpdate; // 🐛 Debug display callback
+  final Function(String debugInfo)? onDebugUpdate;
 
   RealTimeNavigationService({
     required ClipService clipService,
@@ -73,12 +69,11 @@ class RealTimeNavigationService {
     this.onStatusUpdate,
     this.onInstructionUpdate,
     this.onError,
-    this.onDebugUpdate, 
+    this.onDebugUpdate,
   }) : _clipService = clipService, _tts = FlutterTts() {
     _initializeTTS();
     // TEMPORARILY DISABLED: Step counter for testing
     // _initializeStepCounter();
-    _updateDebugDisplay('STEP COUNTER DISABLED\n✅ Using visual-only navigation\n👁️ Only visual similarity required');
   }
 
   // Public getters
@@ -99,6 +94,11 @@ class RealTimeNavigationService {
     }
     final firstWaypoint = _getWaypointBySequence(0);
     return firstWaypoint?.heading;
+  }
+
+  /// Update debug display with navigation information
+  void _updateDebugDisplay(String debugInfo) {
+    onDebugUpdate?.call(debugInfo);
   }
 
   /// Start navigation along the selected route
@@ -136,8 +136,9 @@ class RealTimeNavigationService {
       print('🚀 Navigation started - Starting orientation phase');
       print('⏳ Waiting for compass reading to guide initial direction...');
       
-      // 🐛 Send navigation start info to screen
       _updateDebugDisplay('🚀 NAVIGATION STARTED\n🧭 ORIENTATION PHASE\n⏳ Waiting for compass...\n🎯 Destination: ${route.endNodeName}');
+      
+      // 🐛 Send navigation start info to screen
       
       onStatusUpdate?.call('Starting navigation to ${route.endNodeName}');
       await _speak('Navigation started. Let me help you face the right direction first.');
@@ -176,10 +177,6 @@ class RealTimeNavigationService {
     
     // Reset off-track counter
     _consecutiveOffTrackCount = 0;
-    
-    // Reset step counter state
-    _stepsAtLastWaypoint = 0;
-    _isUserWalking = false;
     
     _setState(NavigationState.idle);
     
@@ -452,7 +449,7 @@ class RealTimeNavigationService {
       print('   🎯 Target: ${targetWaypoint.landmarkDescription ?? 'No description'}, Turn: ${targetWaypoint.turnType}');
       print('   📍 Target sequence: ${targetWaypoint.sequenceNumber}');
       
-      // Send enhanced debug information to screen (visible on phone)
+      // Log detailed waypoint matching information
       final validationInfo = '''
           🔍 WAYPOINT MATCHING:
           ━━━━━━━━━━━━━━━━━━━━
@@ -531,13 +528,20 @@ class RealTimeNavigationService {
     }
   }
 
+  Future<void> _initializeTTS() async {
+    await _tts.setLanguage('en-US');
+    await _tts.setSpeechRate(0.8);
+    await _tts.setVolume(0.88);
+    await _tts.setPitch(1.0);
+  }
+
   /// 🐛 Build debug information string for on-screen display
   String _buildDebugInfo() {
     final buffer = StringBuffer();
     buffer.writeln('🐛 NAVIGATION DEBUG:');
     buffer.writeln('━━━━━━━━━━━━━━━━━━━━');
     buffer.writeln('State: $_state');
-    
+
     if (_state == NavigationState.initialOrientation) {
       buffer.writeln('Phase: Initial Orientation');
       if (_currentHeading != null) {
@@ -549,7 +553,7 @@ class RealTimeNavigationService {
       buffer.writeln('Current Sequence: $_currentSequenceNumber');
       buffer.writeln('Mode: Visual-only (Steps disabled)');
     }
-    
+
     if (_currentRoute != null) {
       buffer.writeln('Route: ${_currentRoute!.endNodeName}');
       buffer.writeln('Total Waypoints: ${_currentRoute!.waypoints.length}');
@@ -559,23 +563,8 @@ class RealTimeNavigationService {
       }
     }
     buffer.writeln('━━━━━━━━━━━━━━━━━━━━');
-    
+
     return buffer.toString();
-  }
-
-  /// Update debug display
-  void _updateDebugDisplay(String additionalInfo) {
-    if (onDebugUpdate == null) return;
-    
-    final debugInfo = _buildDebugInfo() + '\n' + additionalInfo;
-    onDebugUpdate!(debugInfo);
-  }
-
-  Future<void> _initializeTTS() async {
-    await _tts.setLanguage('en-US');
-    await _tts.setSpeechRate(0.8);
-    await _tts.setVolume(0.88);
-    await _tts.setPitch(1.0);
   }
 
   Future<void> _initializeCompass() async {
@@ -942,7 +931,7 @@ class RealTimeNavigationService {
     }
   }
 
-  // Get readable explanation for threshold reasoning (for debug display)
+  // Get readable explanation for threshold reasoning
   String _getThresholdReason(bool waypointHadPeople, bool currentFrameHasPeople, TurnType? nextTurnType) {
     String baseReason;
     if (waypointHadPeople && currentFrameHasPeople) {
@@ -976,61 +965,6 @@ class RealTimeNavigationService {
     _tts.stop();
   }
 
-  /// 🧪 Test method to check if step counter is working
-  void testStepCounter() {
-    print('🧪 Testing step counter...');
-    _updateDebugDisplay('🧪 TESTING STEP COUNTER\n📊 Current total: $_currentTotalSteps\n🔄 Check if this number changes when you walk');
-    
-    // Force a debug update to show current state
-    final testInfo = '''
-      🧪 STEP COUNTER TEST:
-      Current total: $_currentTotalSteps
-      Baseline: $_stepsAtLastWaypoint
-      Since last: ${_currentTotalSteps - _stepsAtLastWaypoint}
-      State: $_state
-      Walking: $_isUserWalking
-
-      🚶 Walk 5-10 steps and check if numbers change!''';
-          _updateDebugDisplay(testInfo);
-  }
-
-  // Test method to check compass readings
-  void testCompass() {
-    print('Testing compass readings...');
-    
-    final compassInfo = '''
-      COMPASS TEST:
-      Current heading: ${_currentHeading?.toStringAsFixed(1) ?? 'null'}°
-      Compass available: ${FlutterCompass.events != null}
-      Navigation state: $_state
-
-      Real-time compass readings will show in console...
-      Turn your device and watch the heading changes.
-    ''';
-    
-    _updateDebugDisplay(compassInfo);
-    
-    // Start a test timer to show compass readings every second
-    Timer.periodic(Duration(seconds: 1), (timer) {
-      if (_state != NavigationState.initialOrientation) {
-        timer.cancel();
-        return;
-      }
-      
-      if (_currentHeading != null) {
-        print('🧭 Test compass: ${_currentHeading!.toStringAsFixed(1)}°');
-      } else {
-        print('🧭 Test compass: No reading');
-      }
-    });
-  }
-
-  /// 🧪 Manual override for compass testing (for debugging only)
-  void setManualHeading(double heading) {
-    _currentHeading = _normalizeHeading(heading);
-    print('🧪 Manual heading set to: ${_currentHeading!.toStringAsFixed(1)}°');
-    _updateDebugDisplay('🧪 MANUAL HEADING SET\n📍 Current: ${_currentHeading!.toStringAsFixed(1)}°\n⚠️ This overrides real compass readings');
-  }
 }
 
 /// Represents a navigation instruction
