@@ -152,7 +152,7 @@ class ContinuousPathRecorder {
     // Process and filter waypoints
     await _processRecordedWaypoints();
     
-    onStatusUpdate?.call('Recording complete. Captured ${_waypoints.length} waypoints.');
+    // Status message removed as requested
   }
 
   Future<void> pauseRecording() async {

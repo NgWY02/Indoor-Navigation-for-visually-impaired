@@ -1002,7 +1002,7 @@ class _NavigationLocalizationScreenState
                           : "Scanning...")
                       : _recognizedPlace,
                   style: const TextStyle(
-                    fontSize: 22, // Adjusted size
+                    fontSize: 22, 
                     fontWeight: FontWeight.bold,
                   ),
                   textAlign: TextAlign.center,
@@ -1027,7 +1027,7 @@ class _NavigationLocalizationScreenState
               children: [
                 ElevatedButton.icon(
                   icon: const Icon(Icons.refresh),
-                  label: const Text("Reload Data"), // Kept specific label
+                  label: const Text("Reload Data"), 
                   onPressed: _isScanning360
                       ? null
                       : () {
@@ -1106,7 +1106,7 @@ class _NavigationLocalizationScreenState
       if (diffToActualNextTarget <= _captureAngleThreshold) {
         guidanceIcon = Icons.check_circle;
         guidanceText =
-            "Perfect! Hold steady at $actualTargetNameForText"; // Text for visual display
+            "Perfect! Hold steady at $actualTargetNameForText"; 
       } else {
         String turnDir = _getTurnDirection(
             _currentHeading!, actualNextTargetForTextGuidance);
@@ -1129,7 +1129,7 @@ class _NavigationLocalizationScreenState
       children: [
         // Compass Painter visual
         SizedBox(
-          width: 220, // Consistent size
+          width: 220, 
           height: 220,
           child: CustomPaint(
             painter: CompassPainter(
@@ -1137,7 +1137,7 @@ class _NavigationLocalizationScreenState
               scannedDirections: _scannedDirections,
               targetAngles: _targetAngles,
               targetAngle:
-                  angleForPainterHighlight, // Painter's highlight follows current heading segment
+                  angleForPainterHighlight, 
               threshold: _captureAngleThreshold,
             ),
           ),

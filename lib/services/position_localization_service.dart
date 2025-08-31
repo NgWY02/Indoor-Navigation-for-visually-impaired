@@ -184,7 +184,67 @@ class PositionLocalizationService {
       return [];
     }
   }
-  
+
+  /// Localize position using multiple directional images
+  Future<LocationMatch?> localizePositionFromDirections(List<File> directionImages) async {
+    try {
+      if (directionImages.isEmpty) {
+        throw Exception('No direction images provided');
+      }
+
+      // Generate embeddings for all direction images
+      final embeddings = <List<double>>[];
+      for (final imageFile in directionImages) {
+        final embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
+        embeddings.add(embedding);
+      }
+
+      // Average the embeddings for better accuracy
+      final averageEmbedding = _calculateAverageEmbedding(embeddings);
+
+      // Get all available nodes with embeddings from database
+      final allNodes = await _getAllNodesWithEmbeddings();
+
+      if (allNodes.isEmpty) {
+        throw Exception('No reference locations found in database');
+      }
+
+      // Find best matching location
+      LocationMatch? bestMatch;
+      double bestSimilarity = 0.0;
+
+      for (final node in allNodes) {
+        // Calculate similarity with each embedding for this node
+        final nodeEmbeddings = await _getNodeEmbeddings(node['id']);
+
+        for (final embedding in nodeEmbeddings) {
+          final similarity = _calculateCosineSimilarity(averageEmbedding, embedding);
+
+          if (similarity > bestSimilarity) {
+            bestSimilarity = similarity;
+            bestMatch = LocationMatch(
+              nodeId: node['id'],
+              nodeName: node['name'],
+              confidence: _calculateConfidence(similarity),
+              similarity: similarity,
+              mapId: node['map_id'],
+            );
+          }
+        }
+      }
+
+      // Return match only if confidence is above threshold
+      if (bestMatch != null && bestMatch.confidence >= _minimumConfidenceThreshold) {
+        return bestMatch;
+      }
+
+      return null;
+    } catch (e) {
+      print('Error in directional position localization: $e');
+      return null;
+    }
+  }
+
   // Private methods
   
   void _captureSample() async {

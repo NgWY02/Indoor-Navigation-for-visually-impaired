@@ -455,7 +455,7 @@ class _MapManagementState extends State<MapManagement> {
                               child: ElevatedButton.icon(
                                 onPressed: _viewMapDetails,
                                 icon: const Icon(Icons.manage_search, size: 18),
-                                label: const Text('Details'),
+                                label: const Text('View Details'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.teal,
                                   foregroundColor: Colors.white,
@@ -511,7 +511,7 @@ class _MapManagementState extends State<MapManagement> {
                                   child: ElevatedButton.icon(
                                     onPressed: _viewMapDetails,
                                     icon: const Icon(Icons.manage_search, size: 18),
-                                    label: const Text('Details'),
+                                    label: const Text('View Details'),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: Colors.teal,
                                       foregroundColor: Colors.white,

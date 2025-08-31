@@ -627,7 +627,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           _isConnectionMode ? 'Exit' : 'Connect',
           style: TextStyle(
             color: _isConnectionMode ? Colors.orange[800] : null,
-            fontSize: 12,
+            fontSize: 18,
             fontWeight: FontWeight.w500,
           ),
         ),
@@ -653,7 +653,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
         style: const TextStyle(
           fontWeight: FontWeight.bold,
           color: Colors.orange,
-          fontSize: 12,
+          fontSize: 16,
         ),
         textAlign: TextAlign.center,
       ),
@@ -1005,7 +1005,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
             return Card(
               margin: EdgeInsets.symmetric(
-                vertical: isMobile ? 4.0 : 6.0,
+                vertical: isMobile ? 2.0 : 4.0,
                 horizontal: isMobile ? 4.0 : 8.0,
               ),
               color: connection['id'] == _selectedConnectionId 
@@ -1014,8 +1014,8 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
               elevation: 2,
               child: ListTile(
                 contentPadding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 8.0 : 12.0,
-                  vertical: isMobile ? 8.0 : 12.0,
+                  horizontal: isMobile ? 12.0 : 16.0,
+                  vertical: isMobile ? 4.0 : 8.0,
                 ),
                 leading: Icon(
                   Icons.route,
@@ -1031,28 +1031,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                     fontWeight: FontWeight.w500,
                   ),
                   overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (connection['custom_instruction'] != null) ...[
-                      Text(
-                        'Note: ${connection['custom_instruction']}',
-                        style: TextStyle(fontSize: isMobile ? 12 : 13),
-                      ),
-                    ],
-                    SizedBox(height: 4),
-                    Text(
-                      connection['connection_type'] == 'recorded' 
-                          ? 'Green line: Recorded walking path with AI data'
-                          : 'Blue line: Basic structural connection',
-                      style: TextStyle(
-                        fontSize: isMobile ? 10 : 12,
-                        color: Colors.grey[600],
-                        fontStyle: FontStyle.italic,
-                      ),
-                    ),
-                  ],
                 ),
                 trailing: ConstrainedBox(
                   constraints: BoxConstraints(
@@ -1075,7 +1053,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                     onPressed: () => _deleteConnection(connection['id']),
                   ),
                 ),
-                isThreeLine: true,
+                isThreeLine: false,
               ),
             );
           },
