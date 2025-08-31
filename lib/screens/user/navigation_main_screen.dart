@@ -45,6 +45,12 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   // Debug overlay
   bool _isDebugVisible = false;
   String _debugInfo = '🐛 Debug overlay ready';
+  
+  // Localization state
+  List<String> _capturedDirections = [];
+  List<String> _directionNames = ['North', 'East', 'South', 'West'];
+  List<File> _capturedFrames = [];
+  int _currentDirectionIndex = 0;
 
   @override
   void initState() {
@@ -98,8 +104,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       await _initializeCamera();
       
       setState(() {
-        _screenState = NavigationScreenState.localizingPosition;
-        _statusMessage = 'Ready to localize position';
+        _screenState = NavigationScreenState.readyToLocalize;
+        _statusMessage = 'Ready to start localization';
       });
 
     } catch (e) {
@@ -174,38 +180,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   }
 
   Future<void> _startLocalization() async {
-    setState(() {
-      _screenState = NavigationScreenState.localizingPosition;
-      _statusMessage = 'Starting position localization...';
-    });
-
-    try {
-      // Capture current image for localization
-      if (_cameraController != null && _cameraController!.value.isInitialized) {
-        final image = await _cameraController!.takePicture();
-        final imageFile = File(image.path);
-        
-        setState(() {
-          _statusMessage = 'Analyzing current location...';
-        });
-        
-        final location = await _localizationService.localizePosition(imageFile);
-        
-        // Clean up temp file
-        await imageFile.delete();
-        
-        if (location != null) {
-          _currentLocation = location;
-          await _loadAvailableRoutes();
-        } else {
-          setState(() {
-            _statusMessage = 'Unable to determine location. Please try again from a different angle.';
-          });
-        }
-      }
-    } catch (e) {
-      _onError('Localization failed: $e');
-    }
+    // This method is deprecated - use _startLocalizationProcess instead
+    await _startLocalizationProcess();
   }
 
   Future<void> _loadAvailableRoutes() async {
@@ -323,22 +299,17 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack( 
+        child: Stack(
           children: [
-            Column(
-              children: [
-                // Camera preview
-                Expanded(
-                  flex: 3,
-                  child: _buildCameraPreview(),
-                ),
-                
-                // Control panel
-                Expanded(
-                  flex: 2,
-                  child: _buildControlPanel(),
-                ),
-              ],
+            // Full screen camera preview
+            _buildCameraPreview(),
+
+            // Overlay control panel at bottom
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: _buildOverlayControlPanel(),
             ),
           ],
         ),
@@ -366,86 +337,101 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       );
     }
 
-    return Stack(
-      children: [
-        CameraPreview(_cameraController!),
-        
-        // Overlay information
-        Positioned(
-          top: 16,
-          left: 16,
-          right: 16,
-          child: Container(
-            padding: EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.7),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_currentLocation != null) ...[
-                  Text(
-                    'Current Location: ${_currentLocation!.nodeName}',
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    'Confidence: ${(_currentLocation!.confidence * 100).round()}%',
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                  SizedBox(height: 8),
-                ],
-                
-                if (_currentInstruction != null) ...[
-                  Text(
-                    _currentInstruction!.displayText,
-                    style: TextStyle(color: Colors.orange, fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 4),
-                  Text(
-                    'Progress: ${_navigationService.progressPercentage.round()}%',
-                    style: TextStyle(color: Colors.white70, fontSize: 14),
-                  ),
-                ] else ...[
-                  Text(
-                    _statusMessage,
-                    style: TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          CameraPreview(_cameraController!),
 
-        // Debug overlay
-        DebugOverlay(
-          debugInfo: _debugInfo,
-          isVisible: _isDebugVisible,
-          onToggle: () {
-            setState(() {
-              _isDebugVisible = !_isDebugVisible;
-            });
-          },
-        ),
-      ],
+          // Debug overlay
+          DebugOverlay(
+            debugInfo: _debugInfo,
+            isVisible: _isDebugVisible,
+            onToggle: () {
+              setState(() {
+                _isDebugVisible = !_isDebugVisible;
+              });
+            },
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildControlPanel() {
+  Widget _buildOverlayControlPanel() {
     return Container(
       padding: EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.grey[900],
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        gradient: LinearGradient(
+          begin: Alignment.bottomCenter,
+          end: Alignment.topCenter,
+          colors: [
+            Colors.black.withOpacity(0.3),
+            Colors.black.withOpacity(0.1),
+            Colors.transparent,
+          ],
+          stops: [0.0, 0.8, 1.0],
+        ),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
+          // Screen content
+          Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.3,
+            ),
             child: _buildScreenContent(),
           ),
-          
-          SizedBox(height: 16),
-          
+
+          SizedBox(height: 12),
+
+          // Navigation instruction (only show during navigation)
+          if (_screenState == NavigationScreenState.navigating && _currentInstruction != null)
+            Container(
+              margin: EdgeInsets.only(bottom: 12),
+              padding: EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange[900]!.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.3),
+                    blurRadius: 8,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _currentInstruction!.displayText,
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text(
+                        'Waypoint ${_currentInstruction!.waypointNumber} of ${_currentInstruction!.totalWaypoints}',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
+                      Spacer(),
+                      Text(
+                        '${_navigationService.progressPercentage.round()}%',
+                        style: TextStyle(color: Colors.white70, fontSize: 14),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: _navigationService.progressPercentage / 100,
+                    backgroundColor: Colors.grey[600],
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                  ),
+                ],
+              ),
+            ),
+
           // Action buttons
           _buildActionButtons(),
         ],
@@ -457,8 +443,12 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     switch (_screenState) {
       case NavigationScreenState.initializing:
         return _buildInitializingContent();
-      case NavigationScreenState.localizingPosition:
-        return _buildLocalizationContent();
+      case NavigationScreenState.readyToLocalize:
+        return _buildReadyToLocalizeContent();
+      case NavigationScreenState.capturingDirections:
+        return _buildCapturingDirectionsContent();
+      case NavigationScreenState.processingLocation:
+        return _buildProcessingLocationContent();
       case NavigationScreenState.selectingRoute:
         return _buildRouteSelectionContent();
       case NavigationScreenState.confirmingRoute:
@@ -474,10 +464,10 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           CircularProgressIndicator(),
-          SizedBox(height: 16),
+          SizedBox(height: 12),
           Text(
             _statusMessage,
-            style: TextStyle(color: Colors.white, fontSize: 16),
+            style: TextStyle(color: Colors.white, fontSize: 14),
             textAlign: TextAlign.center,
           ),
         ],
@@ -485,20 +475,30 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     );
   }
 
-  Widget _buildLocalizationContent() {
-    return Center(
+  Widget _buildReadyToLocalizeContent() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
+        ),
+      ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.location_searching, color: Colors.blue, size: 64),
+          Icon(Icons.location_searching, color: Colors.blue, size: 48),
           SizedBox(height: 16),
           Text(
-            'Position Localization',
+            'Ready to Localize',
             style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
           ),
-          SizedBox(height: 8),
+          SizedBox(height: 12),
           Text(
-            'Point your camera at your surroundings to determine your current location.',
+            'Tap the localize button to find your current location',
             style: TextStyle(color: Colors.white70, fontSize: 14),
             textAlign: TextAlign.center,
           ),
@@ -507,227 +507,228 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     );
   }
 
+  Widget _buildCapturingDirectionsContent() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.camera_alt, color: Colors.green, size: 48),
+          SizedBox(height: 16),
+          Text(
+            'Capture Direction ${_capturedDirections.length + 1} of ${_directionNames.length}',
+            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Point camera towards ${_directionNames[_currentDirectionIndex]} and tap capture',
+            style: TextStyle(color: Colors.white70, fontSize: 16),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 12),
+          LinearProgressIndicator(
+            value: _capturedDirections.length / _directionNames.length,
+            backgroundColor: Colors.grey[700],
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.green),
+          ),
+          SizedBox(height: 8),
+          Text(
+            '${_capturedDirections.length}/${_directionNames.length} directions captured',
+            style: TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildProcessingLocationContent() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text(
+            'Processing Location',
+            style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 12),
+          Text(
+            'Analyzing captured images to identify your location...',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+
+
   Widget _buildRouteSelectionContent() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Available Routes',
-          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
         ),
-        SizedBox(height: 12),
-        
-        Expanded(
-          child: _availableRoutes.isEmpty
-              ? Center(
-                  child: Text(
-                    'No routes available from this location',
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.route, color: Colors.blue, size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Available Routes',
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+          SizedBox(height: 12),
+
+          Expanded(
+            child: _availableRoutes.isEmpty
+                ? Center(
+                    child: Text(
+                      'No routes available from this location',
+                      style: TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: _availableRoutes.length,
+                    itemBuilder: (context, index) {
+                      final route = _availableRoutes[index];
+                      return Card(
+                        color: Colors.grey[800],
+                        margin: EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: Icon(Icons.directions, color: Colors.green, size: 24),
+                          title: Text(
+                            route.endNodeName,
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Text(
+                            route.pathName,
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          trailing: Icon(Icons.arrow_forward_ios, color: Colors.white),
+                          onTap: () => _selectRoute(route),
+                        ),
+                      );
+                    },
                   ),
-                )
-              : ListView.builder(
-                  itemCount: _availableRoutes.length,
-                  itemBuilder: (context, index) {
-                    final route = _availableRoutes[index];
-                    return Card(
-                      color: Colors.grey[800],
-                      child: ListTile(
-                        title: Text(
-                          route.endNodeName,
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              route.pathName,
-                              style: TextStyle(color: Colors.white70),
-                            ),
-                            SizedBox(height: 4),
-                            Row(
-                              children: [
-                                Icon(Icons.straighten, color: Colors.blue, size: 16),
-                                SizedBox(width: 4),
-                                Text(
-                                  route.formattedDistance,
-                                  style: TextStyle(color: Colors.blue),
-                                ),
-                                SizedBox(width: 16),
-                                Icon(Icons.access_time, color: Colors.green, size: 16),
-                                SizedBox(width: 4),
-                                Text(
-                                  route.formattedDuration,
-                                  style: TextStyle(color: Colors.green),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        trailing: Icon(Icons.arrow_forward_ios, color: Colors.white),
-                        onTap: () => _selectRoute(route),
-                      ),
-                    );
-                  },
-                ),
-        ),
-      ],
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildRouteConfirmationContent() {
     if (_selectedRoute == null) return Container();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Confirm Route',
-          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+    return Container(
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.4),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withOpacity(0.1),
+          width: 1,
         ),
-        SizedBox(height: 16),
-        
-        Card(
-          color: Colors.grey[800],
-          child: Padding(
-            padding: EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Destination: ${_selectedRoute!.endNodeName}',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Route: ${_selectedRoute!.pathName}',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-                SizedBox(height: 12),
-                Row(
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.straighten, color: Colors.blue, size: 16),
-                            SizedBox(width: 4),
-                            Text(
-                              _selectedRoute!.formattedDistance,
-                              style: TextStyle(color: Colors.blue),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(Icons.access_time, color: Colors.green, size: 16),
-                            SizedBox(width: 4),
-                            Text(
-                              _selectedRoute!.formattedDuration,
-                              style: TextStyle(color: Colors.green),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                    Spacer(),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '${_selectedRoute!.estimatedSteps} steps',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                        Text(
-                          '${_selectedRoute!.waypoints.length} waypoints',
-                          style: TextStyle(color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
-            ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green, size: 24),
+              SizedBox(width: 8),
+              Text(
+                'Confirm Route',
+                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ],
           ),
-        ),
-      ],
-    );
-  }
+          SizedBox(height: 16),
 
-  Widget _buildNavigationContent() {
-    return Column(
-      children: [
-        if (_currentInstruction != null) ...[
           Card(
-            color: Colors.orange[900],
+            color: Colors.grey[800],
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    _currentInstruction!.displayText,
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 8),
                   Row(
                     children: [
-                      Text(
-                        'Waypoint ${_currentInstruction!.waypointNumber} of ${_currentInstruction!.totalWaypoints}',
-                        style: TextStyle(color: Colors.white70),
-                      ),
-                      Spacer(),
-                      Text(
-                        '${_navigationService.progressPercentage.round()}%',
-                        style: TextStyle(color: Colors.white70),
+                      Icon(Icons.location_on, color: Colors.red, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Destination: ${_selectedRoute!.endNodeName}',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ],
                   ),
-                  SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: _navigationService.progressPercentage / 100,
-                    backgroundColor: Colors.grey[600],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                  SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.route, color: Colors.blue, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Route: ${_selectedRoute!.pathName}',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Icon(Icons.flag, color: Colors.orange, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        '${_selectedRoute!.waypoints.length} waypoints',
+                        style: TextStyle(color: Colors.orange, fontSize: 14),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
           ),
         ],
-        
-        Spacer(),
-        
-        // Emergency controls
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _navigationService.requestRepositioning(),
-                icon: Icon(Icons.refresh),
-                label: Text('Reorient'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ),
-            SizedBox(width: 16),
-            Expanded(
-              child: ElevatedButton.icon(
-                onPressed: () => _navigationService.stopNavigation(),
-                icon: Icon(Icons.stop),
-                label: Text('Stop'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
+      ),
     );
+  }
+
+  Widget _buildNavigationContent() {
+    return Container(); // Navigation controls moved to action buttons
   }
 
   Widget _buildActionButtons() {
@@ -735,30 +736,56 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       case NavigationScreenState.initializing:
         return SizedBox.shrink();
         
-      case NavigationScreenState.localizingPosition:
+      case NavigationScreenState.readyToLocalize:
         return ElevatedButton.icon(
-          onPressed: _isCameraInitialized ? _startLocalization : null,
-          icon: Icon(Icons.location_on),
-          label: Text('Find My Location'),
+          onPressed: _isCameraInitialized ? _startLocalizationProcess : null,
+          icon: Icon(Icons.location_searching, size: 24),
+          label: Text('Start Localization'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.blue,
             foregroundColor: Colors.white,
-            minimumSize: Size(double.infinity, 48),
+            minimumSize: Size(double.infinity, 50),
+            textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
-        
+
+      case NavigationScreenState.capturingDirections:
+        return ElevatedButton.icon(
+          onPressed: _isCameraInitialized ? _captureDirection : null,
+          icon: Icon(Icons.camera_alt, size: 24),
+          label: Text('Capture ${_directionNames[_currentDirectionIndex]}'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.green,
+            foregroundColor: Colors.white,
+            minimumSize: Size(double.infinity, 50),
+            textStyle: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+
+      case NavigationScreenState.processingLocation:
+        return SizedBox.shrink();
+
       case NavigationScreenState.selectingRoute:
         return ElevatedButton.icon(
-          onPressed: _startLocalization,
-          icon: Icon(Icons.refresh),
+          onPressed: _startLocalizationProcess,
+          icon: Icon(Icons.refresh, size: 20),
           label: Text('Relocalize'),
           style: ElevatedButton.styleFrom(
             backgroundColor: Colors.grey[700],
             foregroundColor: Colors.white,
             minimumSize: Size(double.infinity, 48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
         );
-        
+
       case NavigationScreenState.confirmingRoute:
         return Row(
           children: [
@@ -770,38 +797,178 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
                     _selectedRoute = null;
                   });
                 },
-                icon: Icon(Icons.arrow_back),
+                icon: Icon(Icons.arrow_back, size: 20),
                 label: Text('Back'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.grey[700],
                   foregroundColor: Colors.white,
+                  minimumSize: Size(0, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
-            SizedBox(width: 16),
+            SizedBox(width: 12),
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: _startNavigation,
-                icon: Icon(Icons.navigation),
+                icon: Icon(Icons.navigation, size: 20),
                 label: Text('Start Navigation'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
+                  minimumSize: Size(0, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
               ),
             ),
           ],
         );
-        
+
       case NavigationScreenState.navigating:
-        return SizedBox.shrink(); // Controls are in the navigation content
+        return Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _restartNavigationFromBeginning,
+                icon: Icon(Icons.refresh, size: 20),
+                label: Text('Reorient'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  minimumSize: Size(0, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: _stopAndReturnToMain,
+                icon: Icon(Icons.stop, size: 20),
+                label: Text('Stop'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  minimumSize: Size(0, 48),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+    }
+  }
+
+  Future<void> _startLocalizationProcess() async {
+    setState(() {
+      _screenState = NavigationScreenState.capturingDirections;
+      _capturedDirections = [];
+      _capturedFrames = [];
+      _directionNames = ['North', 'East', 'South', 'West'];
+      _currentDirectionIndex = 0;
+      _statusMessage = 'Point camera towards North and tap "Capture North"';
+    });
+  }
+
+  Future<void> _captureDirection() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      _onError('Camera not ready');
+      return;
+    }
+
+    try {
+      setState(() {
+        _statusMessage = 'Capturing ${_directionNames[_currentDirectionIndex]}...';
+      });
+
+      final image = await _cameraController!.takePicture();
+      final imageFile = File(image.path);
+
+      _capturedFrames.add(imageFile);
+      _capturedDirections.add(_directionNames[_currentDirectionIndex]);
+
+      _currentDirectionIndex++;
+
+      if (_currentDirectionIndex >= _directionNames.length) {
+        // All directions captured, process location
+        await _processCapturedDirections();
+      } else {
+        // Move to next direction
+        setState(() {
+          _statusMessage = 'Point camera towards ${_directionNames[_currentDirectionIndex]} and tap "Capture ${_directionNames[_currentDirectionIndex]}"';
+        });
+      }
+    } catch (e) {
+      _onError('Failed to capture direction: $e');
+    }
+  }
+
+  Future<void> _processCapturedDirections() async {
+    setState(() {
+      _screenState = NavigationScreenState.processingLocation;
+      _statusMessage = 'Processing captured directions...';
+    });
+
+    try {
+      // Use the localization service to process all captured frames
+      final location = await _localizationService.localizePositionFromDirections(_capturedFrames);
+      
+      // Clean up temp files
+      for (final frame in _capturedFrames) {
+        await frame.delete();
+      }
+
+      if (location != null) {
+        _currentLocation = location;
+        await _loadAvailableRoutes();
+      } else {
+        setState(() {
+          _screenState = NavigationScreenState.readyToLocalize;
+          _statusMessage = 'Unable to determine location. Please try again from a different position.';
+        });
+      }
+    } catch (e) {
+      _onError('Failed to process directions: $e');
+      setState(() {
+        _screenState = NavigationScreenState.readyToLocalize;
+      });
+    }
+  }
+
+  Future<void> _stopAndReturnToMain() async {
+    await _navigationService.stopNavigation();
+    setState(() {
+      _screenState = NavigationScreenState.readyToLocalize;
+      _selectedRoute = null;
+      _currentLocation = null;
+      _availableRoutes = [];
+      _currentInstruction = null;
+      _statusMessage = 'Ready to start localization';
+    });
+  }
+
+  Future<void> _restartNavigationFromBeginning() async {
+    if (_selectedRoute != null) {
+      await _navigationService.stopNavigation();
+      await _navigationService.startNavigation(_selectedRoute!);
+      // Optionally reset any progress if the service supports it
     }
   }
 }
 
 enum NavigationScreenState {
   initializing,
-  localizingPosition,
+  readyToLocalize,
+  capturingDirections,
+  processingLocation,
   selectingRoute,
   confirmingRoute,
   navigating,

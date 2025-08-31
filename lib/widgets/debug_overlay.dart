@@ -5,20 +5,12 @@ class DebugOverlay extends StatelessWidget {
   final String debugInfo;
   final bool isVisible;
   final VoidCallback? onToggle;
-  final VoidCallback? onTestAuth; // 🔐 Test authentication status
-  final VoidCallback? onTestPaths; // 🧪 Test path creation and loading
-  final VoidCallback? onDebugDatabase; // 🔍 Debug database contents
-  final VoidCallback? onRunMigration; // 🔧 Run database migration
 
   const DebugOverlay({
     Key? key,
     required this.debugInfo,
     this.isVisible = true,
     this.onToggle,
-    this.onTestAuth,
-    this.onTestPaths,
-    this.onDebugDatabase,
-    this.onRunMigration,
   }) : super(key: key);
 
   @override
@@ -42,23 +34,23 @@ class DebugOverlay extends StatelessWidget {
     }
 
     return Positioned(
-      top: mediaQuery.padding.top + 10,
-      left: 8,
-      right: 8,
+      top: mediaQuery.padding.top + (isSmallScreen ? 8 : 12),
+      left: isSmallScreen ? 6 : 8,
+      right: isSmallScreen ? 6 : 8,
       child: Container(
         constraints: BoxConstraints(
-          maxHeight: screenHeight * 0.4, // Max 40% of screen height
-          maxWidth: screenWidth - 16,
+          maxHeight: screenHeight * (isSmallScreen ? 0.35 : 0.4), // Adaptive height
+          maxWidth: screenWidth - (isSmallScreen ? 12 : 16),
         ),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.85),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.red, width: 2),
+          color: Colors.black.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 12),
+          border: Border.all(color: Colors.red.withOpacity(0.8), width: 1.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: Colors.black.withOpacity(0.4),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
             ),
           ],
         ),
@@ -116,120 +108,16 @@ class DebugOverlay extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      debugInfo.isEmpty ? 'No debug info available' : debugInfo,
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: isSmallScreen ? 10 : 11,
-                        fontFamily: 'monospace',
-                        height: 1.2,
-                      ),
-                    ),
-                    if (onTestAuth != null) ...[
-                      SizedBox(height: isSmallScreen ? 6 : 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: onTestAuth,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isSmallScreen ? 6 : 8,
-                              vertical: isSmallScreen ? 3 : 4,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          child: Text(
-                            '🔐 Check Auth Status',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 9 : 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (onTestPaths != null) ...[
-                      SizedBox(height: isSmallScreen ? 6 : 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: onTestPaths,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isSmallScreen ? 6 : 8,
-                              vertical: isSmallScreen ? 3 : 4,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          child: Text(
-                            '🧪 Test Path Creation',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 9 : 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (onDebugDatabase != null) ...[
-                      SizedBox(height: isSmallScreen ? 6 : 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: onDebugDatabase,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isSmallScreen ? 6 : 8,
-                              vertical: isSmallScreen ? 3 : 4,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          child: Text(
-                            '🔍 Debug Database',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 9 : 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (onRunMigration != null) ...[
-                      SizedBox(height: isSmallScreen ? 6 : 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton(
-                          onPressed: onRunMigration,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.orange,
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isSmallScreen ? 6 : 8,
-                              vertical: isSmallScreen ? 3 : 4,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                          ),
-                          child: Text(
-                            '🔧 Fix Organization IDs',
-                            style: TextStyle(
-                              fontSize: isSmallScreen ? 9 : 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                    // Format debug info with better structure
+                    if (debugInfo.isNotEmpty) ...[
+                      _buildFormattedDebugText(debugInfo, isSmallScreen),
+                    ] else ...[
+                      Text(
+                        'No debug info available',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: isSmallScreen ? 10 : 11,
+                          fontStyle: FontStyle.italic,
                         ),
                       ),
                     ],
@@ -242,59 +130,42 @@ class DebugOverlay extends StatelessWidget {
       ),
     );
   }
-}
 
-/// Mixin to add debug overlay functionality to navigation screens
-mixin DebugOverlayMixin<T extends StatefulWidget> on State<T> {
-  String _debugInfo = '';
-  bool _isDebugVisible = true;
+  Widget _buildFormattedDebugText(String debugInfo, bool isSmallScreen) {
+    // Split debug info into lines and format each one
+    final lines = debugInfo.split('\n').where((line) => line.trim().isNotEmpty);
 
-  void updateDebugInfo(String info) {
-    if (mounted) {
-      setState(() {
-        _debugInfo = info;
-      });
-    }
-  }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: lines.map((line) {
+        // Check if line starts with emoji or special characters
+        final hasEmoji = line.trim().startsWith(RegExp(r'[^\w\s]'));
+        final isError = line.contains('Error') || line.contains('Failed') || line.contains('Exception');
+        final isSuccess = line.contains('Success') || line.contains('✅') || line.contains('Complete');
+        final isWarning = line.contains('Warning') || line.contains('⚠️');
 
-  void toggleDebugOverlay() {
-    if (mounted) {
-      setState(() {
-        _isDebugVisible = !_isDebugVisible;
-      });
-    }
-  }
+        Color textColor = Colors.white;
+        if (isError) textColor = Colors.red[300]!;
+        else if (isSuccess) textColor = Colors.green[300]!;
+        else if (isWarning) textColor = Colors.orange[300]!;
+        else if (hasEmoji) textColor = Colors.blue[200]!;
 
-  // 🔐 Override this in your screen to add authentication testing
-  void testStepCounter() {
-    // Default implementation - can be overridden
-    updateDebugInfo(_debugInfo + '\n🔐 Auth check button pressed!');
-  }
-
-  Widget buildDebugOverlay() {
-    return DebugOverlay(
-      debugInfo: _debugInfo,
-      isVisible: _isDebugVisible,
-      onToggle: toggleDebugOverlay,
-      onTestAuth: testStepCounter,
-      onTestPaths: testPathCreation,
-      onDebugDatabase: debugDatabaseContents,
-      onRunMigration: runDatabaseMigration,
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: Text(
+            line.trim(),
+            style: TextStyle(
+              color: textColor,
+              fontSize: isSmallScreen ? 9 : 10,
+              fontFamily: hasEmoji ? null : 'monospace',
+              height: 1.3,
+              fontWeight: hasEmoji ? FontWeight.w500 : FontWeight.normal,
+            ),
+            softWrap: true,
+            overflow: TextOverflow.visible,
+          ),
+        );
+      }).toList(),
     );
-  }
-
-  void testPathCreation() {
-    // This method should be overridden by classes using this mixin
-    updateDebugInfo('Path creation test not implemented for this screen');
-  }
-
-  void debugDatabaseContents() {
-    // This method should be overridden by classes using this mixin
-    updateDebugInfo('Database debug not implemented for this screen');
-  }
-
-  void runDatabaseMigration() {
-    // This method should be overridden by classes using this mixin
-    updateDebugInfo('Database migration not implemented for this screen');
   }
 }

@@ -355,14 +355,353 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     return "$normalizedAngle°";
   }
 
-  @override
-  void dispose() {
-    _pathRecorder.dispose();
-    _compassSubscription?.cancel();
-    _cameraController.dispose();
-    _flutterTts.stop();
-    _pathNameController.dispose();
-    super.dispose();
+  Widget _buildCameraPreview(double screenWidth, double screenHeight) {
+    return SizedBox.expand(
+      child: Stack(
+        children: [
+          // Camera preview (same as navigation screen)
+          CameraPreview(_cameraController),
+
+          // Status overlay - responsive positioning
+          Positioned(
+            top: screenHeight * 0.02,
+            left: screenWidth * 0.05,
+            child: Container(
+              padding: EdgeInsets.all(screenWidth * 0.02),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Waypoints: $_waypointCount",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: screenWidth * 0.03,
+                    ),
+                  ),
+                  Text(
+                    "Heading: ${_getDirectionName(_currentHeading)}",
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: screenWidth * 0.025,
+                    ),
+                  ),
+                  if (_currentHeading != null)
+                    Text(
+                      "${_currentHeading!.round()}°",
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: screenWidth * 0.025,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+
+          // Status message overlay - responsive positioning
+          if (_statusMessage.isNotEmpty && !_isProcessing)
+            Positioned(
+              left: screenWidth * 0.05,
+              right: screenWidth * 0.05,
+              bottom: screenHeight * 0.02,
+              child: Container(
+                padding: EdgeInsets.all(screenWidth * 0.02),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _statusMessage,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: screenWidth * 0.03,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+
+          // Processing overlay - blocks interactions during waypoint processing
+          if (_isProcessing)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black.withValues(alpha: 0.8),
+                child: Center(
+                  child: Container(
+                    padding: EdgeInsets.all(screenWidth * 0.06),
+                    margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.1),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 10,
+                          spreadRadius: 2,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Processing indicator
+                        SizedBox(
+                          width: screenWidth * 0.15,
+                          height: screenWidth * 0.15,
+                          child: const CircularProgressIndicator(
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
+                            strokeWidth: 4,
+                          ),
+                        ),
+                        SizedBox(height: screenHeight * 0.02),
+                        // Processing title
+                        Text(
+                          "Processing Waypoints",
+                          style: TextStyle(
+                            fontSize: screenWidth * 0.045,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: screenHeight * 0.01),
+                        // Processing message
+                        Text(
+                          _statusMessage,
+                          style: TextStyle(
+                            fontSize: screenWidth * 0.035,
+                            color: Colors.black54,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        SizedBox(height: screenHeight * 0.02),
+                        // Processing hint
+                        Text(
+                          "Please wait while we process your recorded path...",
+                          style: TextStyle(
+                            fontSize: screenWidth * 0.03,
+                            color: Colors.black45,
+                            fontStyle: FontStyle.italic,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomControls(double screenWidth, double screenHeight) {
+    return Container(
+      padding: EdgeInsets.all(screenWidth * 0.04),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Instructions section - uses status messages from continuous_path_recorder
+          if (_isRecording || _waypointCount > 0)
+            Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: screenWidth * 0.04,
+                vertical: screenHeight * 0.01,
+              ),
+              child: Column(
+                children: [
+                  // Main instruction from status message
+                  if (_statusMessage.isNotEmpty && !_isProcessing)
+                    Text(
+                      _statusMessage,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: screenWidth * 0.040,
+                        fontWeight: FontWeight.w500,
+                        shadows: [
+                          Shadow(
+                            blurRadius: 2.0,
+                            color: Colors.black,
+                            offset: Offset(1.0, 1.0),
+                          ),
+                        ],
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  // Waypoint count
+                  if (_waypointCount > 0)
+                    Padding(
+                      padding: EdgeInsets.only(top: screenHeight * 0.005),
+                      child: Text(
+                        "Waypoint ${_waypointCount} captured",
+                        style: TextStyle(
+                          color: Colors.green[300],
+                          fontSize: screenWidth * 0.03,
+                          fontWeight: FontWeight.w400,
+                          shadows: [
+                            Shadow(
+                              blurRadius: 2.0,
+                              color: Colors.black,
+                              offset: Offset(1.0, 1.0),
+                            ),
+                          ],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+          // Route info - always shown above buttons
+          Container(
+            padding: EdgeInsets.symmetric(
+              horizontal: screenWidth * 0.04,
+              vertical: screenHeight * 0.015,
+            ),
+            margin: EdgeInsets.only(bottom: screenHeight * 0.02),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.7),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.startLocationName,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: screenWidth * 0.05,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                SizedBox(width: screenWidth * 0.02),
+                Icon(
+                  Icons.arrow_forward,
+                  color: Colors.teal,
+                  size: screenWidth * 0.05,
+                ),
+                SizedBox(width: screenWidth * 0.02),
+                Flexible(
+                  child: Text(
+                    widget.endLocationName,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: screenWidth * 0.05,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // Main control buttons - equal size
+          if (!_isRecording)
+            Row(
+              children: [
+                // Cancel button - equal size, white text and icon
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: Icon(Icons.cancel, size: screenWidth * 0.06),
+                    label: Text(
+                      "Cancel",
+                      style: TextStyle(fontSize: screenWidth * 0.04),
+                    ),
+                    onPressed: _isProcessing ? null : () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: BorderSide(color: Colors.white),
+                      padding: EdgeInsets.symmetric(vertical: screenHeight * 0.02),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(width: screenWidth * 0.02),
+                // Start Recording button - equal size (removed flex: 2)
+                Expanded(
+                  child: ElevatedButton.icon(
+                    icon: Icon(Icons.play_arrow, size: screenWidth * 0.06),
+                    label: Text(
+                      "Start Recording",
+                      style: TextStyle(fontSize: screenWidth * 0.04),
+                    ),
+                    onPressed: _isProcessing ? null : (_isClipServerReady ? _startRecording : null),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isProcessing ? Colors.grey[400] : Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(vertical: screenHeight * 0.02),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+          if (_isRecording)
+            // Stop Recording button - full width
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: Icon(Icons.stop, size: screenWidth * 0.06),
+                label: Text(
+                  "Stop Recording",
+                  style: TextStyle(fontSize: screenWidth * 0.04),
+                ),
+                onPressed: _isProcessing ? null : _stopRecording,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _isProcessing ? Colors.grey[400] : Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: EdgeInsets.symmetric(vertical: screenHeight * 0.02),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+
+          if (!_isRecording && _waypointCount > 0)
+            Padding(
+              padding: EdgeInsets.only(top: screenHeight * 0.015),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  icon: Icon(Icons.save, size: screenWidth * 0.045),
+                  label: Text(
+                    "Save Path",
+                    style: TextStyle(fontSize: screenWidth * 0.03),
+                  ),
+                  onPressed: _isProcessing ? null : () => _showSavePathDialog(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isProcessing ? Colors.grey[400] : Colors.teal,
+                    foregroundColor: Colors.white,
+                    padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -422,311 +761,17 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
       body: Container(
         color: Colors.black,
         child: SafeArea(
-          child: Column(
+          child: Stack(
             children: [
-              // Camera preview - responsive for phones
-              Expanded(
-                flex: isPortrait ? 5 : 3,
-                child: Stack(
-                  children: [
-                    // Camera preview
-                    Positioned.fill(
-                      child: CameraPreview(_cameraController),
-                    ),
+              // Full screen camera preview (same as navigation screen)
+              _buildCameraPreview(screenWidth, screenHeight),
 
-                    // Compact route info overlay - responsive positioning
-                    Positioned(
-                      top: screenHeight * 0.02,
-                      left: screenWidth * 0.05,
-                      right: screenWidth * 0.05,
-                      child: Container(
-                        padding: EdgeInsets.symmetric(
-                          horizontal: screenWidth * 0.04,
-                          vertical: screenHeight * 0.01,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.7),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Flexible(
-                              child: Text(
-                                widget.startLocationName,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: screenWidth * 0.03,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                textAlign: TextAlign.center,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            SizedBox(width: screenWidth * 0.02),
-                            Icon(
-                              Icons.arrow_forward,
-                              color: Colors.teal,
-                              size: screenWidth * 0.04,
-                            ),
-                            SizedBox(width: screenWidth * 0.02),
-                            Flexible(
-                              child: Text(
-                                widget.endLocationName,
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: screenWidth * 0.03,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                textAlign: TextAlign.center,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Status overlay - responsive positioning
-                    Positioned(
-                      top: screenHeight * 0.08,
-                      left: screenWidth * 0.05,
-                      child: Container(
-                        padding: EdgeInsets.all(screenWidth * 0.02),
-                        decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "Waypoints: $_waypointCount",
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: screenWidth * 0.03,
-                              ),
-                            ),
-                            Text(
-                              "Heading: ${_getDirectionName(_currentHeading)}",
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: screenWidth * 0.025,
-                              ),
-                            ),
-                            if (_currentHeading != null)
-                              Text(
-                                "${_currentHeading!.round()}°",
-                                style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: screenWidth * 0.025,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Status message overlay - responsive positioning
-                    if (_statusMessage.isNotEmpty && !_isProcessing)
-                      Positioned(
-                        left: screenWidth * 0.05,
-                        right: screenWidth * 0.05,
-                        bottom: screenHeight * 0.02,
-                        child: Container(
-                          padding: EdgeInsets.all(screenWidth * 0.02),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            _statusMessage,
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: screenWidth * 0.03,
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-
-                    // Processing overlay - blocks interactions during waypoint processing
-                    if (_isProcessing)
-                      Positioned.fill(
-                        child: Container(
-                          color: Colors.black.withValues(alpha: 0.8),
-                          child: Center(
-                            child: Container(
-                              padding: EdgeInsets.all(screenWidth * 0.06),
-                              margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.1),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(20),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.3),
-                                    blurRadius: 10,
-                                    spreadRadius: 2,
-                                  ),
-                                ],
-                              ),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  // Processing indicator
-                                  SizedBox(
-                                    width: screenWidth * 0.15,
-                                    height: screenWidth * 0.15,
-                                    child: const CircularProgressIndicator(
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.teal),
-                                      strokeWidth: 4,
-                                    ),
-                                  ),
-                                  SizedBox(height: screenHeight * 0.02),
-                                  // Processing title
-                                  Text(
-                                    "Processing Waypoints",
-                                    style: TextStyle(
-                                      fontSize: screenWidth * 0.045,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.black87,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                  SizedBox(height: screenHeight * 0.01),
-                                  // Processing message
-                                  Text(
-                                    _statusMessage,
-                                    style: TextStyle(
-                                      fontSize: screenWidth * 0.035,
-                                      color: Colors.black54,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                  SizedBox(height: screenHeight * 0.02),
-                                  // Processing hint
-                                  Text(
-                                    "Please wait while we process your recorded path...",
-                                    style: TextStyle(
-                                      fontSize: screenWidth * 0.03,
-                                      color: Colors.black45,
-                                      fontStyle: FontStyle.italic,
-                                    ),
-                                    textAlign: TextAlign.center,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              // Bottom controls - responsive for phones
-              Container(
-                padding: EdgeInsets.all(screenWidth * 0.04),
-                color: Colors.white,
-                child: Column(
-                  children: [
-                    // Main control buttons - responsive sizing
-                    if (!_isRecording)
-                      Row(
-                        children: [
-                          // Cancel button - responsive
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              icon: Icon(Icons.cancel, size: screenWidth * 0.045),
-                              label: Text(
-                                "Cancel",
-                                style: TextStyle(fontSize: screenWidth * 0.03),
-                              ),
-                              onPressed: _isProcessing ? null : () => Navigator.of(context).pop(),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: _isProcessing ? Colors.grey[400] : Colors.grey[700],
-                                side: BorderSide(color: _isProcessing ? Colors.grey[300]! : Colors.grey[400]!),
-                                padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
-                          SizedBox(width: screenWidth * 0.02),
-                          // Start Recording button - responsive
-                          Expanded(
-                            flex: 2,
-                            child: ElevatedButton.icon(
-                              icon: Icon(Icons.play_arrow, size: screenWidth * 0.045),
-                              label: Text(
-                                "Start Recording",
-                                style: TextStyle(fontSize: screenWidth * 0.03),
-                              ),
-                              onPressed: _isProcessing ? null : (_isClipServerReady ? _startRecording : null),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _isProcessing ? Colors.grey[400] : Colors.green,
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                    if (_isRecording)
-                      Row(
-                        children: [
-                          // Stop Recording button - responsive, full width
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              icon: Icon(Icons.stop, size: screenWidth * 0.045),
-                              label: Text(
-                                "Stop Recording",
-                                style: TextStyle(fontSize: screenWidth * 0.03),
-                              ),
-                              onPressed: _isProcessing ? null : _stopRecording,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _isProcessing ? Colors.grey[400] : Colors.red,
-                                foregroundColor: Colors.white,
-                                padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                    if (!_isRecording && _waypointCount > 0)
-                      Padding(
-                        padding: EdgeInsets.only(top: screenHeight * 0.015),
-                        child: SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            icon: Icon(Icons.save, size: screenWidth * 0.045),
-                            label: Text(
-                              "Save Path",
-                              style: TextStyle(fontSize: screenWidth * 0.03),
-                            ),
-                            onPressed: _isProcessing ? null : () => _showSavePathDialog(),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: _isProcessing ? Colors.grey[400] : Colors.teal,
-                              foregroundColor: Colors.white,
-                              padding: EdgeInsets.symmetric(vertical: screenHeight * 0.015),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+              // Bottom controls overlay
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _buildBottomControls(screenWidth, screenHeight),
               ),
             ],
           ),

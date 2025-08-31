@@ -161,13 +161,12 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
         ),
       );
     }
-
     return WillPopScope(
       onWillPop: () async {
         // When user presses back, sign out first to clear session, then go to login
         await _supabaseService.signOut();
         Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
-        return false; // Prevent default back behavior
+        return false; 
       },
       child: Scaffold(
         appBar: AppBar(
@@ -354,8 +353,8 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
             );
           },
         ),
-      ), // body: SafeArea
-    ), // child: Scaffold
-    ); // WillPopScope
+      ), 
+    ), 
+    ); 
   }
 }
