@@ -40,15 +40,17 @@ class RealTimeNavigationService {
   List<double>? _lastCapturedEmbedding;
   DateTime _lastGuidanceTime = DateTime.now();
   
-  // Configuration
-  static const double _waypointReachedThresholdDefault = 0.88; 
-  static const double _offTrackThreshold = 0.4; 
+  // Configuration - ALL threshold constants are centralized HERE
+  // To change any threshold value, modify these constants only
+  static const double _waypointReachedThresholdDefault = 0.85;  // Main navigation threshold
+  static const double _offTrackThreshold = 0.4;
+  static const double _cleanSceneThreshold = 0.85;  // For clean-to-clean comparisons
+  static const double _peoplePresentThreshold = 0.75;  // For scenes with people
+  static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
+  static const double _turnWaypointThreshold = 0.92;  // Higher threshold for turn waypoints (left/right/U-turn)
   static const Duration _guidanceInterval = Duration(seconds: 1);
-  static const Duration _repositioningTimeout = Duration(seconds: 10);
-  
-  // Dynamic threshold and audio management
+  static const Duration _repositioningTimeout = Duration(seconds: 10);  // Dynamic threshold and audio management
   double _currentWaypointThreshold = 0.88;
-  bool _peopleDetectedInLastFrame = false;
   String? _lastSpokenInstruction;
   DateTime? _lastInstructionTime;
   
@@ -122,7 +124,6 @@ class RealTimeNavigationService {
       // Reset audio tracking for new navigation session
       _lastSpokenInstruction = null;
       _lastInstructionTime = null;
-      _peopleDetectedInLastFrame = false;
       _currentWaypointThreshold = _waypointReachedThresholdDefault;
       
       // Reset off-track counter for new navigation session
@@ -172,7 +173,6 @@ class RealTimeNavigationService {
     // Reset audio tracking and people detection state
     _lastSpokenInstruction = null;
     _lastInstructionTime = null;
-    _peopleDetectedInLastFrame = false;
     _currentWaypointThreshold = _waypointReachedThresholdDefault;
     
     // Reset off-track counter
@@ -408,33 +408,31 @@ class RealTimeNavigationService {
         return;
       }
       
-      // First, detect if people are present in the current frame
-      final peopleDetection = await _clipService.detectPeople(imageFile);
-      _peopleDetectedInLastFrame = peopleDetection.peopleDetected;
-      
-      // 🎯 SMART THRESHOLD ADJUSTMENT: Use waypoint's people_detected field for dynamic threshold
-      // 🚪 HALLWAY FIX: Higher thresholds for waypoints BEFORE turns to prevent premature turn instructions
-      final nextWaypoint = _getWaypointBySequence(_currentSequenceNumber + 1); // Look ahead to next waypoint
-      _currentWaypointThreshold = _calculateDynamicThreshold(
-        waypointHadPeople: targetWaypoint.peopleDetected,
-        waypointPeopleCount: targetWaypoint.peopleCount,
-        currentFrameHasPeople: peopleDetection.peopleDetected,
-        currentFramePeopleCount: peopleDetection.peopleCount,
-        nextWaypointTurnType: nextWaypoint?.turnType, // Check if NEXT waypoint requires turning
+      // Use YOLO detection and dynamic threshold with inpainting for navigation accuracy
+      final navigationResult = await _clipService.generateNavigationEmbeddingWithInpainting(
+        imageFile,
+        cleanSceneThreshold: _cleanSceneThreshold,
+        peoplePresentThreshold: _peoplePresentThreshold,
+        crowdedSceneThreshold: _crowdedSceneThreshold,
       );
+      _lastCapturedEmbedding = navigationResult.embedding;
+      
+      // HALLWAY FIX: Use higher threshold for waypoints BEFORE turns to prevent premature turn instructions
+      final nextWaypoint = _getWaypointBySequence(_currentSequenceNumber + 1);
+      final isBeforeTurnWaypoint = nextWaypoint != null &&
+                                 (nextWaypoint.turnType == TurnType.left ||
+                                  nextWaypoint.turnType == TurnType.right ||
+                                  nextWaypoint.turnType == TurnType.uTurn);
+
+      _currentWaypointThreshold = isBeforeTurnWaypoint ? _turnWaypointThreshold : navigationResult.recommendedThreshold;
       
       print('🎯 Navigation frame: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
-      print('👥 Waypoint people info: ${targetWaypoint.peopleDetected} (${targetWaypoint.peopleCount} people when recorded)');
-      print('👥 Current frame people: ${peopleDetection.peopleDetected} (count: ${peopleDetection.peopleCount})');
-      print('🚪 Current waypoint: ${targetWaypoint.turnType.toString().split('.').last}, Next waypoint: ${nextWaypoint?.turnType.toString().split('.').last ?? 'none'} ${nextWaypoint?.turnType == TurnType.left || nextWaypoint?.turnType == TurnType.right || nextWaypoint?.turnType == TurnType.uTurn ? "(HALLWAY FIX APPLIED)" : ""}');
-      print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} ${_getThresholdReason(targetWaypoint.peopleDetected, peopleDetection.peopleDetected, nextWaypoint?.turnType)}');
-      
-      // Generate embedding for current view WITHOUT people inpainting (faster for navigation)
-      final currentEmbedding = await _clipService.generateNavigationEmbedding(imageFile);
-      _lastCapturedEmbedding = currentEmbedding;
+      print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} (${isBeforeTurnWaypoint ? 'BEFORE TURN (0.92)' : 'NORMAL (' + navigationResult.recommendedThreshold.toStringAsFixed(2) + ')'})');
+      print('👥 People detected: ${navigationResult.peopleDetected ? 'YES (${navigationResult.peopleCount})' : 'NO'}');
+      print('🎨 Inpainting: ${navigationResult.peopleDetected ? 'Applied (people + carried objects removed)' : 'Skipped (no people detected)'}');
       
       // Calculate similarity with target waypoint
-      final similarity = _calculateCosineSimilarity(currentEmbedding, targetWaypoint.embedding);
+      final similarity = _calculateCosineSimilarity(navigationResult.embedding, targetWaypoint.embedding);
       print(' Similarity: ${similarity.toStringAsFixed(3)} (threshold: ${_currentWaypointThreshold.toStringAsFixed(2)})');
       
       // STEP COUNTER SOLUTION: Multi-condition waypoint validation
@@ -454,10 +452,11 @@ class RealTimeNavigationService {
           🔍 WAYPOINT MATCHING:
           ━━━━━━━━━━━━━━━━━━━━
           📍 Target: ${targetWaypoint.landmarkDescription ?? 'No landmark'} (Seq ${_currentSequenceNumber})
-          � Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${targetWaypoint.turnType == TurnType.left || targetWaypoint.turnType == TurnType.right || targetWaypoint.turnType == TurnType.uTurn ? "⚡HALLWAY FIX" : ""}
-          �👥 When Recorded: ${targetWaypoint.peopleDetected ? "👥 YES (${targetWaypoint.peopleCount} people)" : "✅ NO people"}
-          👥 Now Detecting: ${_peopleDetectedInLastFrame ? "👥 YES (${peopleDetection.peopleCount})" : "✅ NO people"} 
-          🎯 Threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} ${_getThresholdReason(targetWaypoint.peopleDetected, peopleDetection.peopleDetected, nextWaypoint?.turnType)}
+          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.92 threshold)" : ""}
+          When Recorded: ${targetWaypoint.peopleDetected ? "YES (${targetWaypoint.peopleCount} people)" : "NO people"}
+          Now Detecting: ${navigationResult.peopleDetected ? "YES (${navigationResult.peopleCount} people)" : "NO people"} (YOLO active)
+          � Inpainting: ${navigationResult.peopleDetected ? "Applied (people removed)" : "Not needed"}
+          �🎯 Threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} (dynamic based on people detection)
           👁️ Similarity: ${similarity.toStringAsFixed(3)}
           ${hasVisualMatch ? "✅ MATCH!" : "❌ Too low"} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})
           🔍 Embedding: ${_lastCapturedEmbedding?.length ?? 0} dims
@@ -535,37 +534,7 @@ class RealTimeNavigationService {
     await _tts.setPitch(1.0);
   }
 
-  /// 🐛 Build debug information string for on-screen display
-  String _buildDebugInfo() {
-    final buffer = StringBuffer();
-    buffer.writeln('🐛 NAVIGATION DEBUG:');
-    buffer.writeln('━━━━━━━━━━━━━━━━━━━━');
-    buffer.writeln('State: $_state');
 
-    if (_state == NavigationState.initialOrientation) {
-      buffer.writeln('Phase: Initial Orientation');
-      if (_currentHeading != null) {
-        buffer.writeln('Current Heading: ${_currentHeading!.toStringAsFixed(1)}°');
-      } else {
-        buffer.writeln('Current Heading: Reading...');
-      }
-    } else {
-      buffer.writeln('Current Sequence: $_currentSequenceNumber');
-      buffer.writeln('Mode: Visual-only (Steps disabled)');
-    }
-
-    if (_currentRoute != null) {
-      buffer.writeln('Route: ${_currentRoute!.endNodeName}');
-      buffer.writeln('Total Waypoints: ${_currentRoute!.waypoints.length}');
-      if (_state != NavigationState.initialOrientation) {
-        final progress = ((_currentSequenceNumber / _getTotalSequenceNumbers()) * 100).round();
-        buffer.writeln('Progress: $progress%');
-      }
-    }
-    buffer.writeln('━━━━━━━━━━━━━━━━━━━━');
-
-    return buffer.toString();
-  }
 
   Future<void> _initializeCompass() async {
     try {
@@ -865,100 +834,9 @@ class RealTimeNavigationService {
 
   // Calculate dynamic threshold based on waypoint people_detected field vs current frame
   // HALLWAY FIX: Higher thresholds for waypoints BEFORE turns to prevent premature turn instructions
-  double _calculateDynamicThreshold({
-    required bool waypointHadPeople,
-    required int waypointPeopleCount,
-    required bool currentFrameHasPeople,
-    required int currentFramePeopleCount,
-    required TurnType? nextWaypointTurnType, // Check if NEXT waypoint requires turning
-  }) {
-    // HALLWAY FIX: Base threshold adjustment based on what's coming NEXT
-    double baseThresholdBoost = 0.0;
-    
-    // Higher thresholds for waypoints that come BEFORE turning waypoints
-    if (nextWaypointTurnType != null) {
-      switch (nextWaypointTurnType) {
-        case TurnType.left:
-        case TurnType.right:
-          baseThresholdBoost = 0.04; // Add 6% to threshold before turns
-          print('🚪 Hallway fix: Adding +0.06 threshold boost - next waypoint requires ${nextWaypointTurnType.toString().split('.').last} turn');
-          break;
-        case TurnType.uTurn:
-          baseThresholdBoost = 0.04; // Add 8% before U-turns (more critical)
-          print('🚪 Hallway fix: Adding +0.08 threshold boost - next waypoint requires U-turn');
-          break;
-        case TurnType.straight:
-          baseThresholdBoost = 0.0; // No boost before straight waypoints
-          break;
-      }
-    } else {
-      // No next waypoint (probably final waypoint) - no boost needed
-      baseThresholdBoost = 0.0;
-      print('🚪 No next waypoint found - using standard threshold');
-    }
-    
-    // Case 1: Waypoint was recorded with people → Lower base threshold but still apply hallway fix
-    if (waypointHadPeople) {
-      // The waypoint embedding was processed with people inpainting (cleaner)
-      // Current frame may or may not have people (raw processing)
-      double baseThreshold = 0.75; // Lower base threshold
-      
-      // Further reduce based on people count in recording
-      double reduction = (waypointPeopleCount * 0.02).clamp(0.0, 0.08);
-      double peopleAdjustedThreshold = (baseThreshold - reduction).clamp(0.65, 0.80);
-      
-      // Apply hallway fix boost and ensure it doesn't go below minimum safe threshold
-      double finalThreshold = (peopleAdjustedThreshold + baseThresholdBoost).clamp(0.70, 0.95);
-      
-      return finalThreshold;
-    }
-    
-    // Case 2: Waypoint was recorded clean (no people) → Higher threshold + hallway fix
-    else {
-      double cleanBaseThreshold;
-      if (currentFrameHasPeople) {
-        // Clean waypoint vs people in current frame → Need lower threshold
-        cleanBaseThreshold = 0.78;
-      } else {
-        // Clean waypoint vs clean current frame → Can use higher threshold
-        cleanBaseThreshold = 0.88;
-      }
-      
-      // Apply hallway fix boost and ensure reasonable upper limit
-      double finalThreshold = (cleanBaseThreshold + baseThresholdBoost).clamp(0.75, 0.98);
-      
-      return finalThreshold;
-    }
-  }
 
-  // Get readable explanation for threshold reasoning
-  String _getThresholdReason(bool waypointHadPeople, bool currentFrameHasPeople, TurnType? nextTurnType) {
-    String baseReason;
-    if (waypointHadPeople && currentFrameHasPeople) {
-      baseReason = "(people→people)";
-    } else if (waypointHadPeople && !currentFrameHasPeople) {
-      baseReason = "(people→clean, lowered)";
-    } else if (!waypointHadPeople && currentFrameHasPeople) {
-      baseReason = "(clean→people, lowered)";
-    } else {
-      baseReason = "(clean→clean, standard)";
-    }
-    
-    // Add hallway fix indication for waypoints BEFORE turning waypoints
-    if (nextTurnType != null) {
-      switch (nextTurnType) {
-        case TurnType.left:
-        case TurnType.right:
-          return baseReason + " +BEFORE_TURN";
-        case TurnType.uTurn:
-          return baseReason + " +BEFORE_UTURN";
-        case TurnType.straight:
-          return baseReason;
-      }
-    } else {
-      return baseReason + " (final)";
-    }
-  }
+
+
 
   void dispose() {
     stopNavigation();

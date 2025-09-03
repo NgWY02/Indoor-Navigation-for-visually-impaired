@@ -8,14 +8,12 @@ import '../models/path_models.dart';
 class LocationMatch {
   final String nodeId;
   final String nodeName;
-  final double confidence;
   final double similarity;
   final String mapId;
 
   LocationMatch({
     required this.nodeId,
     required this.nodeName,
-    required this.confidence,
     required this.similarity,
     required this.mapId,
   });
@@ -29,6 +27,11 @@ class PositionLocalizationService {
   static const double _minimumConfidenceThreshold = 0.6;
   static const int _maxSamplesForLocalization = 5;
   static const Duration _samplingInterval = Duration(seconds: 2);
+  
+  // People detection and inpainting thresholds for localization
+  static const double _cleanSceneThreshold = 0.85;  // For clean-to-clean comparisons
+  static const double _peoplePresentThreshold = 0.75;  // For scenes with people
+  static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
   
   // State
   List<List<double>> _capturedEmbeddings = [];
@@ -70,11 +73,22 @@ class PositionLocalizationService {
     _capturedEmbeddings.clear();
   }
   
-  /// Localize user position based on captured embeddings
+  /// Localize user position based on captured embeddings with people detection and inpainting
   Future<LocationMatch?> localizePosition(File imageFile) async {
     try {
-      // Generate embedding for the current image with people removal preprocessing
-      final currentEmbedding = await _clipService.generatePreprocessedEmbedding(imageFile);
+      // Generate embedding with people detection and inpainting for better localization accuracy
+      final navigationResult = await _clipService.generateNavigationEmbeddingWithInpainting(
+        imageFile,
+        cleanSceneThreshold: _cleanSceneThreshold,
+        peoplePresentThreshold: _peoplePresentThreshold,
+        crowdedSceneThreshold: _crowdedSceneThreshold,
+      );
+      
+      final currentEmbedding = navigationResult.embedding;
+      
+      print('🎯 Localization: People detected: ${navigationResult.peopleDetected ? 'YES (${navigationResult.peopleCount})' : 'NO'}');
+      print('🎨 Localization: Inpainting: ${navigationResult.peopleDetected ? 'Applied (people removed)' : 'Not needed'}');
+      print('🎯 Localization: Dynamic threshold: ${navigationResult.recommendedThreshold.toStringAsFixed(2)}');
       
       // Get all available nodes with embeddings from database
       final allNodes = await _getAllNodesWithEmbeddings();
@@ -99,7 +113,6 @@ class PositionLocalizationService {
             bestMatch = LocationMatch(
               nodeId: node['id'],
               nodeName: node['name'],
-              confidence: _calculateConfidence(similarity),
               similarity: similarity,
               mapId: node['map_id'],
             );
@@ -107,9 +120,12 @@ class PositionLocalizationService {
         }
       }
       
-      // Return match only if confidence is above threshold
-      if (bestMatch != null && bestMatch.confidence >= _minimumConfidenceThreshold) {
+      // Return match only if similarity is above the dynamic threshold
+      if (bestMatch != null && bestSimilarity >= navigationResult.recommendedThreshold) {
+        print('✅ Localization successful: ${bestMatch.nodeName} (similarity: ${bestSimilarity.toStringAsFixed(3)}, threshold: ${navigationResult.recommendedThreshold.toStringAsFixed(2)})');
         return bestMatch;
+      } else if (bestMatch != null) {
+        print('❌ Localization failed: Best similarity ${bestSimilarity.toStringAsFixed(3)} below threshold ${navigationResult.recommendedThreshold.toStringAsFixed(2)}');
       }
       
       return null;
@@ -128,11 +144,11 @@ class PositionLocalizationService {
       // Get user profile to check organization
       final userProfile = await _supabaseService.getCurrentUserProfile();
       final userOrganizationId = userProfile?['organization_id'];
-      print('👤 User organization ID: $userOrganizationId');
+      print('User organization ID: $userOrganizationId');
 
       if (userOrganizationId == null) {
-        print('⚠️ WARNING: User has no organization assigned!');
-        print('⚠️ This means they can only see paths they created themselves');
+        print('WARNING: User has no organization assigned!');
+        print('This means they can only see paths they created themselves');
       }
 
       // Get all navigation paths that start from this node
@@ -188,59 +204,138 @@ class PositionLocalizationService {
   /// Localize position using multiple directional images
   Future<LocationMatch?> localizePositionFromDirections(List<File> directionImages) async {
     try {
+      print('🎯 Starting directional localization with ${directionImages.length} images');
+      
       if (directionImages.isEmpty) {
         throw Exception('No direction images provided');
       }
 
-      // Generate embeddings for all direction images
-      final embeddings = <List<double>>[];
-      for (final imageFile in directionImages) {
-        final embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
-        embeddings.add(embedding);
+      // Check user authentication
+      final userId = _supabaseService.currentUser?.id;
+      if (userId == null) {
+        print('❌ No user authenticated for localization');
+        return null;
+      }
+      print('👤 User authenticated: $userId');
+
+      // Generate embeddings for all direction images with inpainting and people detection
+      final embeddingResults = <NavigationEmbeddingResult>[];
+      for (int i = 0; i < directionImages.length; i++) {
+        print('🎨 Processing image ${i + 1}/${directionImages.length}');
+        final result = await _clipService.generateNavigationEmbeddingWithInpainting(
+          directionImages[i],
+          cleanSceneThreshold: _cleanSceneThreshold,
+          peoplePresentThreshold: _peoplePresentThreshold,
+          crowdedSceneThreshold: _crowdedSceneThreshold,
+        );
+        embeddingResults.add(result);
+        print('🎨 Image ${i + 1}: People detected: ${result.peopleDetected ? "${result.peopleCount} people" : "none"}, threshold: ${result.recommendedThreshold.toStringAsFixed(2)}');
       }
 
-      // Average the embeddings for better accuracy
-      final averageEmbedding = _calculateAverageEmbedding(embeddings);
+      // Use the most conservative threshold from all images (highest threshold)
+      final recommendedThreshold = embeddingResults
+          .map((r) => r.recommendedThreshold)
+          .reduce((a, b) => a > b ? a : b);
+
+      print('🎯 Using conservative threshold: ${recommendedThreshold.toStringAsFixed(2)}');
 
       // Get all available nodes with embeddings from database
       final allNodes = await _getAllNodesWithEmbeddings();
 
       if (allNodes.isEmpty) {
-        throw Exception('No reference locations found in database');
+        print('❌ No reference locations found in database');
+        return null;
+      }
+      print('📊 Found ${allNodes.length} reference locations');
+
+      // Compare each directional embedding individually and collect votes
+      final locationVotes = <String, int>{};
+      final locationSimilarities = <String, List<double>>{};
+      final locationDetails = <String, Map<String, dynamic>>{};
+
+      // Store details for each node
+      for (final node in allNodes) {
+        locationDetails[node['id']] = node;
+        locationSimilarities[node['id']] = [];
       }
 
-      // Find best matching location
-      LocationMatch? bestMatch;
-      double bestSimilarity = 0.0;
+      // Compare each directional embedding against all stored embeddings
+      for (int directionIndex = 0; directionIndex < embeddingResults.length; directionIndex++) {
+        final directionEmbedding = embeddingResults[directionIndex].embedding;
+        print('🔍 Comparing direction ${directionIndex + 1} embedding...');
 
-      for (final node in allNodes) {
-        // Calculate similarity with each embedding for this node
-        final nodeEmbeddings = await _getNodeEmbeddings(node['id']);
+        for (final node in allNodes) {
+          final nodeId = node['id'];
+          final nodeEmbeddings = await _getNodeEmbeddings(nodeId);
 
-        for (final embedding in nodeEmbeddings) {
-          final similarity = _calculateCosineSimilarity(averageEmbedding, embedding);
+          if (nodeEmbeddings.isEmpty) continue;
 
-          if (similarity > bestSimilarity) {
-            bestSimilarity = similarity;
-            bestMatch = LocationMatch(
-              nodeId: node['id'],
-              nodeName: node['name'],
-              confidence: _calculateConfidence(similarity),
-              similarity: similarity,
-              mapId: node['map_id'],
-            );
+          // Find best similarity for this direction against this node's embeddings
+          double bestSimilarityForDirection = 0.0;
+          for (final storedEmbedding in nodeEmbeddings) {
+            final similarity = _calculateCosineSimilarity(directionEmbedding, storedEmbedding);
+            if (similarity > bestSimilarityForDirection) {
+              bestSimilarityForDirection = similarity;
+            }
+          }
+
+          // If this direction matches this node above threshold, count it as a vote
+          if (bestSimilarityForDirection >= recommendedThreshold) {
+            locationVotes[nodeId] = (locationVotes[nodeId] ?? 0) + 1;
+            locationSimilarities[nodeId]!.add(bestSimilarityForDirection);
+            print('  ✅ Direction ${directionIndex + 1} matches ${node['name']} (similarity: ${bestSimilarityForDirection.toStringAsFixed(3)})');
+          } else {
+            locationSimilarities[nodeId]!.add(bestSimilarityForDirection);
           }
         }
       }
 
-      // Return match only if confidence is above threshold
-      if (bestMatch != null && bestMatch.confidence >= _minimumConfidenceThreshold) {
+      // Find the location with the most votes (majority voting)
+      String? bestLocationId;
+      int maxVotes = 0;
+      double bestAverageSimilarity = 0.0;
+
+      print('📊 Voting results:');
+      for (final entry in locationVotes.entries) {
+        final nodeId = entry.key;
+        final votes = entry.value;
+        final similarities = locationSimilarities[nodeId]!;
+        final averageSimilarity = similarities.reduce((a, b) => a + b) / similarities.length;
+
+        print('  ${locationDetails[nodeId]!['name']}: $votes votes, avg similarity: ${averageSimilarity.toStringAsFixed(3)}');
+
+        // Select location with most votes, break ties by highest average similarity
+        if (votes > maxVotes || (votes == maxVotes && averageSimilarity > bestAverageSimilarity)) {
+          maxVotes = votes;
+          bestLocationId = nodeId;
+          bestAverageSimilarity = averageSimilarity;
+        }
+      }
+
+      // Require at least 2 votes (out of 4 directions) for a valid match
+      if (bestLocationId != null && maxVotes >= 2) {
+        final bestNode = locationDetails[bestLocationId]!;
+        final similarities = locationSimilarities[bestLocationId]!;
+        final averageSimilarity = similarities.reduce((a, b) => a + b) / similarities.length;
+
+        final bestMatch = LocationMatch(
+          nodeId: bestLocationId,
+          nodeName: bestNode['name'],
+          similarity: averageSimilarity,
+          mapId: bestNode['map_id'],
+        );
+
+        print('✅ Directional localization successful: ${bestMatch.nodeName} (${maxVotes}/4 directions matched, avg similarity: ${averageSimilarity.toStringAsFixed(3)})');
         return bestMatch;
+      } else if (bestLocationId != null) {
+        print('❌ Insufficient votes: Best location ${locationDetails[bestLocationId]!['name']} only got $maxVotes/4 votes (need at least 2)');
+      } else {
+        print('❌ No location received enough votes from directional images');
       }
 
       return null;
     } catch (e) {
-      print('Error in directional position localization: $e');
+      print('❌ Error in directional position localization: $e');
       return null;
     }
   }
@@ -282,7 +377,6 @@ class PositionLocalizationService {
             bestMatch = LocationMatch(
               nodeId: node['id'],
               nodeName: node['name'],
-              confidence: _calculateConfidence(similarity),
               similarity: similarity,
               mapId: node['map_id'],
             );
@@ -290,8 +384,8 @@ class PositionLocalizationService {
         }
       }
       
-      if (bestMatch != null && bestMatch.confidence >= _minimumConfidenceThreshold) {
-        _statusController!.add('Location identified: ${bestMatch.nodeName} (${(bestMatch.confidence * 100).round()}% confidence)');
+      if (bestMatch != null && bestMatch.similarity >= _minimumConfidenceThreshold) {
+        _statusController!.add('Location identified: ${bestMatch.nodeName} (${(bestMatch.similarity * 100).round()}% similarity)');
       } else {
         _statusController!.add('Unable to determine location. Please try from a different angle.');
       }
@@ -521,11 +615,7 @@ class PositionLocalizationService {
     return dotProduct / (normVec1 * normVec2);
   }
   
-  double _calculateConfidence(double similarity) {
-    // Convert similarity to confidence (0.0 to 1.0)
-    // Apply some curve to make confidence more meaningful
-    return pow(similarity, 0.5).toDouble().clamp(0.0, 1.0);
-  }
+
   
   Duration _estimateDuration(double distanceMeters) {
     // Estimate walking time: average walking speed ~1.4 m/s

@@ -5,7 +5,7 @@ echo.
 echo Starting CLIP ViT-L/14 HTTP Gateway...
 echo This integrates ViT-L/14 + SAM + LaMa + Stable Diffusion + YOLO
 echo.
-start "CLIP ViT-L/14 Gateway" cmd /k "conda activate inpaint && python clip_http_gateway.py"
+start "CLIP ViT-L/14 Gateway" cmd /k "conda activate dinov2 && python clip_http_gateway.py"
 
 echo Waiting 20 seconds for ViT-L/14 model to load...
 echo (ViT-L/14 is larger and takes longer to initialize)

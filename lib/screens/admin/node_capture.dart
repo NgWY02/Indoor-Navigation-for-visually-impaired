@@ -400,6 +400,7 @@ class _NodeCaptureState extends State<NodeCapture> {
       appBar: AppBar(
         // Change title based on mode and step
         title: Text(_isEditMode ? 'Edit Location Node' : 'Add Location Node'),
+        backgroundColor: Theme.of(context).primaryColor,
         leading: _currentStep > 1 
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),

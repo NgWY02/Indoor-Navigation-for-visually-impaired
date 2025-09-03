@@ -21,7 +21,7 @@ class _ImageTestScreenState extends State<ImageTestScreen> {
   final ImagePicker _picker = ImagePicker();
   
   // Server configuration - use network IP for mobile access
-  static const String _serverHost = '192.168.0.101'; // Your PC's IP address
+  static const String _serverHost = '192.168.0.104'; // Your PC's IP address
   static const int _serverPort = 8000; 
 
   @override

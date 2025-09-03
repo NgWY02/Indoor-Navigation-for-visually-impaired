@@ -40,6 +40,7 @@ class ContinuousPathRecorder {
   
   // Recording state
   bool _isRecording = false;
+  bool _processingCancelled = false; // Flag to cancel waypoint processing
   List<PathWaypoint> _waypoints = [];
   List<RawWaypointData> _rawWaypoints = []; // Store raw frames for batch processing
   Timer? _recordingTimer;
@@ -77,6 +78,10 @@ class ContinuousPathRecorder {
   List<PathWaypoint> get waypoints => List.unmodifiable(_waypoints);
   int get waypointCount => _isRecording ? _rawWaypoints.length : _waypoints.length;
 
+  void cancelProcessing() {
+    _processingCancelled = true;
+  }
+
   Future<void> startRecording(String pathId) async {
     if (_isRecording) {
       onError?.call('Recording already in progress');
@@ -91,12 +96,11 @@ class ContinuousPathRecorder {
     try {
       _currentPathId = pathId;
       _isRecording = true;
+      _processingCancelled = false; // Reset cancellation flag
       _waypoints.clear();
       _rawWaypoints.clear();
       _sequenceNumber = 0;
       _recordingStartTime = DateTime.now();
-      
-      onStatusUpdate?.call('Starting path recording...');
       
       // Initialize compass
       await _initializeCompass();
@@ -117,7 +121,8 @@ class ContinuousPathRecorder {
         });
       });
       
-      onStatusUpdate?.call('Recording started. Walk naturally along your path.');
+      // Announce that recording has started
+      onStatusUpdate?.call('Recording Started');
       
     } catch (e) {
       _isRecording = false;
@@ -141,7 +146,7 @@ class ContinuousPathRecorder {
     _compassSubscription = null;
 
     print('✅ All timers cancelled, processing waypoints...');
-    onStatusUpdate?.call('Recording stopped. Processing ${_rawWaypoints.length} captured frames...');
+    // Status message removed as requested
     
     //Give any in-flight waypoint captures time to check the flag
     await Future.delayed(const Duration(milliseconds: 100));
@@ -159,7 +164,7 @@ class ContinuousPathRecorder {
     if (!_isRecording) return;
     
     _recordingTimer?.cancel();
-    onStatusUpdate?.call('Recording paused. Tap resume to continue.');
+    // Status message removed as requested
   }
 
   Future<void> resumeRecording() async {
@@ -173,7 +178,7 @@ class ContinuousPathRecorder {
       _captureWaypoint();
     });
     
-    onStatusUpdate?.call('Recording resumed.');
+    // Status message removed as requested
   }
 
   void addManualWaypoint(String description) {
@@ -267,7 +272,7 @@ class ContinuousPathRecorder {
       _rawWaypoints.add(rawWaypoint);
       _lastHeading = _normalizeHeading(_currentHeading!);
       
-      // Update status
+      // Send waypoint capture status update
       String statusMessage = 'Waypoint ${_rawWaypoints.length} captured.';
       if (isDecisionPoint) {
         statusMessage += ' (${turnType.name} turn detected)';
@@ -348,26 +353,23 @@ class ContinuousPathRecorder {
     _waypoints.clear(); // Clear any existing waypoints
     
     for (int i = 0; i < _rawWaypoints.length; i++) {
+      if (_processingCancelled) {
+        print('Processing cancelled by user');
+        // Status message removed as requested
+        return;
+      }
+      
       final rawWaypoint = _rawWaypoints[i];
       
       try {
-        // Update status
-        onStatusUpdate?.call('Processing frame ${i + 1}/${_rawWaypoints.length}');
+        // Update status - removed as requested
+        // onStatusUpdate?.call('Processing frame ${i + 1}/${_rawWaypoints.length}');
         
-        // Run people detection and embedding generation in parallel
+        // Generate embedding only (no people detection during recording)
         final File imageFile = File(rawWaypoint.imagePath);
-        final futures = await Future.wait([
-          _clipService.detectPeople(imageFile),
-          _clipService.generatePreprocessedEmbedding(imageFile),
-        ]);
+        final embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
         
-        final peopleResult = futures[0] as PeopleDetectionResult;
-        final embedding = futures[1] as List<double>;
-        
-        // 🐛 DEBUG: Check people detection result
-        print('🔍 DEBUG waypoint ${i + 1}: peopleDetected=${peopleResult.peopleDetected}, count=${peopleResult.peopleCount}, scores=${peopleResult.confidenceScores}');
-        
-        // Create final waypoint with embedding AND people detection info
+        // Create final waypoint with default people detection values (no YOLO detection)
         final waypoint = PathWaypoint(
           id: rawWaypoint.id,
           embedding: embedding,
@@ -379,10 +381,10 @@ class ContinuousPathRecorder {
           distanceFromPrevious: rawWaypoint.distanceFromPrevious,
           timestamp: rawWaypoint.timestamp,
           sequenceNumber: rawWaypoint.sequenceNumber,
-          // Store people detection info for smart navigation thresholds
-          peopleDetected: peopleResult.peopleDetected,
-          peopleCount: peopleResult.peopleCount,
-          peopleConfidenceScores: peopleResult.confidenceScores,
+          // No people detection during recording - set defaults
+          peopleDetected: false,
+          peopleCount: 0,
+          peopleConfidenceScores: [],
         );
         
         _waypoints.add(waypoint);
@@ -390,7 +392,7 @@ class ContinuousPathRecorder {
         // Clean up the raw image file
         await imageFile.delete();
         
-        print('Processed waypoint ${i + 1}/${_rawWaypoints.length}: people=${peopleResult.peopleCount}, embedding=${embedding.length}d');
+        print('Processed waypoint ${i + 1}/${_rawWaypoints.length}: embedding=${embedding.length}d (no YOLO detection)');
         
       } catch (e) {
         print('Error processing waypoint ${i + 1}: $e');
@@ -414,6 +416,12 @@ class ContinuousPathRecorder {
   Future<void> _processRecordedWaypoints() async {
     if (_waypoints.isEmpty) return;
 
+    if (_processingCancelled) {
+      print('Processing cancelled by user');
+      // Status message removed as requested
+      return;
+    }
+
     print('Processing ${_waypoints.length} recorded waypoints...');
     
     // Filter out redundant waypoints that are too similar
@@ -431,6 +439,9 @@ class ContinuousPathRecorder {
         keepReason = 'LAST waypoint';
       } else if (_waypoints[i].isDecisionPoint) {
         keepReason = 'DECISION POINT (${_waypoints[i].turnType.name})';
+      } else if (i < _waypoints.length - 1 && _waypoints[i + 1].isDecisionPoint) {
+        // Keep waypoint before a decision point (turn)
+        keepReason = 'BEFORE TURN (${_waypoints[i + 1].turnType.name})';
       } else {
         // Check similarity with previous kept waypoint
         if (filteredWaypoints.isNotEmpty) {
@@ -486,7 +497,7 @@ class ContinuousPathRecorder {
     print('Original waypoints: ${_waypoints.length + removedCount}');
     print('Removed duplicates: $removedCount');
     print('Final waypoints: ${_waypoints.length}');
-    onStatusUpdate?.call('Filtered to ${_waypoints.length} key waypoints (removed $removedCount duplicates)');
+    // Status message removed as requested
   }
 
   double _calculateCosineSimilarity(List<double> vec1, List<double> vec2) {

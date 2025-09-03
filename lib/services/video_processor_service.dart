@@ -410,8 +410,8 @@ class VideoProcessorService {
         return List.filled(512, 0.0);
       }
 
-      // Use CLIP service to generate embedding with people removal preprocessing
-      final embedding = await _clipService.generatePreprocessedEmbedding(imageFile);
+      // Use CLIP service to generate raw embedding
+      final embedding = await _clipService.generateImageEmbedding(imageFile);
       print('VideoProcessor: Generated CLIP embedding with ${embedding.length} dimensions');
       
       return embedding;

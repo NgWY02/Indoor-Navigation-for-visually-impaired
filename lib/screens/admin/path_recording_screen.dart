@@ -44,6 +44,10 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
   bool _isRecording = false;
   bool _isProcessing = false; // Track when waypoints are being processed
   
+  // Overlay message for center screen display
+  String _overlayMessage = "";
+  Timer? _overlayTimer;
+  
   // Path info
   final TextEditingController _pathNameController = TextEditingController();
   
@@ -123,21 +127,20 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
       clipService: _clipService,
       cameraController: _cameraController,
       onStatusUpdate: (message) {
-        setState(() {
-          _statusMessage = message;
-          // Detect when processing starts
-          if (message.contains('Processing') || message.contains('Recording stopped. Processing')) {
-            _isProcessing = true;
-          }
-          // Detect when processing ends
-          else if (message.contains('Recording complete') || 
-                   message.contains('Path saved') || 
-                   message.contains('Error') ||
-                   message.contains('Failed')) {
-            _isProcessing = false;
-          }
-        });
-        _speak(message);
+        // Only handle non-waypoint and non-recording messages with status display
+        if ((!message.contains('Waypoint') || !message.contains('captured')) && 
+            !message.contains('Recording Started')) {
+          setState(() {
+            _statusMessage = message;
+          });
+        }
+        // Audio feedback for waypoint captures and recording started
+        if ((message.contains('Waypoint') && message.contains('captured')) || 
+            message.contains('Recording Started')) {
+          _speak(message);
+          // Show overlay message in center of screen instead of snackbar
+          _showOverlayMessage(message, durationSeconds: 2);
+        }
       },
       onWaypointCaptured: (waypoint) {
         setState(() {
@@ -171,6 +174,24 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     }
   }
 
+  void _showOverlayMessage(String message, {int durationSeconds = 2}) {
+    setState(() {
+      _overlayMessage = message;
+    });
+    
+    // Cancel any existing timer
+    _overlayTimer?.cancel();
+    
+    // Set timer to hide the overlay
+    _overlayTimer = Timer(Duration(seconds: durationSeconds), () {
+      if (mounted) {
+        setState(() {
+          _overlayMessage = "";
+        });
+      }
+    });
+  }
+
   Future<void> _startRecording() async {
     if (!_isClipServerReady) {
       _speak("CLIP service not ready. Cannot start recording.");
@@ -191,6 +212,7 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     await _pathRecorder.stopRecording();
     setState(() {
       _isRecording = false;
+      _statusMessage = ""; // Clear any lingering status messages
       // Note: _isProcessing will be set to true by the status update callback
       // when processing starts, and reset when processing completes
     });
@@ -232,6 +254,8 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
         actions: [
           TextButton(
             onPressed: () {
+              // Cancel any ongoing waypoint processing
+              _pathRecorder.cancelProcessing();
               Navigator.pop(context);
               // Optionally ask if they want to discard the recording
             },
@@ -256,10 +280,6 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
     }
 
     try {
-      setState(() {
-        _statusMessage = "Saving path...";
-      });
-
       NavigationPath path = _pathRecorder.createNavigationPath(
         name: _pathNameController.text,
         startLocationId: widget.startLocationId,
@@ -279,24 +299,13 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
             saveError.toString().contains('Authentication error')) {
 
           // Try to refresh the session
-          setState(() {
-            _statusMessage = "Authentication issue detected. Refreshing session...";
-          });
-
           final sessionRefreshed = await supabaseService.refreshSession();
 
           if (sessionRefreshed) {
             // Try saving again after session refresh
-            setState(() {
-              _statusMessage = "Session refreshed. Retrying save...";
-            });
-
             try {
               await supabaseService.savePath(path);
             } catch (retryError) {
-              setState(() {
-                _statusMessage = "Failed to save path after session refresh. Please sign out and sign in again.";
-              });
               _speak("Failed to save path. Please sign out and sign in again.");
               return;
             }
@@ -313,21 +322,12 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
         }
       }
 
-      setState(() {
-        _statusMessage = "Path saved successfully!";
-      });
-
-      _speak("Path saved successfully");
-
       // Return to previous screen after a delay
       Future.delayed(const Duration(seconds: 2), () {
         Navigator.pop(context, path);
       });
 
     } catch (e) {
-      setState(() {
-        _statusMessage = "Error saving path: $e";
-      });
       _speak("Error saving path");
     }
   }
@@ -492,6 +492,47 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
                         ),
                       ],
                     ),
+                  ),
+                ),
+              ),
+            ),
+
+          // Center overlay for recording status messages
+          if (_overlayMessage.isNotEmpty)
+            Positioned.fill(
+              child: Center(
+                child: Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: screenWidth * 0.08,
+                    vertical: screenWidth * 0.06,
+                  ),
+                  margin: EdgeInsets.symmetric(horizontal: screenWidth * 0.1),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        blurRadius: 10,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    _overlayMessage,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: screenWidth * 0.05,
+                      fontWeight: FontWeight.w600,
+                      shadows: [
+                        Shadow(
+                          blurRadius: 3.0,
+                          color: Colors.black,
+                          offset: Offset(1.0, 1.0),
+                        ),
+                      ],
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ),
               ),
@@ -705,11 +746,19 @@ class _PathRecordingScreenState extends State<PathRecordingScreen> {
   }
 
   @override
+  void dispose() {
+    _overlayTimer?.cancel();
+    _compassSubscription?.cancel();
+    _pathRecorder.dispose();
+    _cameraController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
     final screenWidth = screenSize.width;
     final screenHeight = screenSize.height;
-    final isPortrait = screenHeight > screenWidth;
 
     if (_isLoading) {
       return Scaffold(
