@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/path_models.dart';
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.104:8000'; 
+  static const String _defaultServerUrl = 'http://192.168.0.102:8000'; 
   final String serverUrl;
   
   ClipService({this.serverUrl = _defaultServerUrl});
@@ -30,7 +30,7 @@ class ClipService {
     return _generateEmbedding(imageFile, '/encode');
   }
 
-  /// Generate embeddings with people removal preprocessing (YOLO+Stable Diffusion) - for recording
+  /// Generate embeddings without preprocessing - for recording
   Future<List<double>> generatePreprocessedEmbedding(File imageFile) async {
     return _generateEmbedding(imageFile, '/encode/preprocessed');
   }
@@ -40,22 +40,35 @@ class ClipService {
     return _generateEmbedding(imageFile, '/encode/navigation');
   }
 
-  /// Combined navigation method: detect people + generate embedding + calculate threshold
-  Future<NavigationEmbeddingResult> generateNavigationEmbeddingWithThreshold(File imageFile) async {
+  /// Generate embeddings for navigation with inpainting (for real-time navigation accuracy)
+  Future<List<double>> generateNavigationEmbeddingInpainted(File imageFile) async {
+    return _generateEmbedding(imageFile, '/encode/inpainted');
+  }
+
+  /// Combined navigation method with inpainting: detect people + generate inpainted embedding + calculate threshold
+  Future<NavigationEmbeddingResult> generateNavigationEmbeddingWithInpainting(
+    File imageFile, {
+    required double cleanSceneThreshold,
+    required double peoplePresentThreshold,
+    required double crowdedSceneThreshold,
+  }) async {
     try {
-      // Run people detection and embedding generation in parallel for speed
+      // Run people detection and inpainted embedding generation in parallel for speed
       final futures = await Future.wait([
         detectPeople(imageFile),
-        generateNavigationEmbedding(imageFile),
+        generateNavigationEmbeddingInpainted(imageFile),
       ]);
       
       final peopleResult = futures[0] as PeopleDetectionResult;
       final embedding = futures[1] as List<double>;
       
-      // Calculate dynamic threshold based on people presence (legacy method)
+      // Calculate dynamic threshold based on people presence with configurable values
       double threshold = _calculateNavigationThreshold(
         peopleResult.peopleCount, 
-        peopleResult.confidenceScores
+        peopleResult.confidenceScores,
+        cleanSceneThreshold: cleanSceneThreshold,
+        peoplePresentThreshold: peoplePresentThreshold,
+        crowdedSceneThreshold: crowdedSceneThreshold,
       );
       
       return NavigationEmbeddingResult(
@@ -67,14 +80,14 @@ class ClipService {
       );
       
     } catch (e) {
-      debugPrint('ClipService: Error in navigation embedding: $e');
-      // Return safe defaults
+      debugPrint('ClipService: Error in navigation embedding with inpainting: $e');
+      // Return safe defaults using the provided threshold values
       return NavigationEmbeddingResult(
         embedding: List.filled(768, 0.0),
         peopleDetected: false,
         peopleCount: 0,
         confidenceScores: [],
-        recommendedThreshold: 0.85,
+        recommendedThreshold: cleanSceneThreshold, // Use the provided clean scene threshold
       );
     }
   }
@@ -82,19 +95,17 @@ class ClipService {
   /// Smart navigation method: uses stored waypoint people info for optimal threshold
   Future<NavigationEmbeddingResult> generateSmartNavigationEmbedding(
     File imageFile,
-    PathWaypoint targetWaypoint,
-  ) async {
+    PathWaypoint targetWaypoint, {
+    required double fixedThreshold,
+  }) async {
     try {
       // Only generate embedding - NO people detection during navigation for consistent threshold
       final embedding = await generateNavigationEmbedding(imageFile);
       
-      // Calculate FIXED threshold based on RECORDING people info only
-      double threshold = calculateFixedNavigationThreshold(
-        recordingHadPeople: targetWaypoint.peopleDetected,
-        recordingPeopleCount: targetWaypoint.peopleCount,
-      );
+      // Use configurable fixed threshold
+      double threshold = fixedThreshold;
       
-      debugPrint('Fixed threshold for waypoint: ${threshold.toStringAsFixed(2)} (recording had ${targetWaypoint.peopleCount} people)');
+      debugPrint('Fixed threshold for waypoint: ${threshold.toStringAsFixed(2)} (no YOLO detection during recording)');
       
       return NavigationEmbeddingResult(
         embedding: embedding,
@@ -106,13 +117,13 @@ class ClipService {
       
     } catch (e) {
       debugPrint('ClipService: Error in smart navigation embedding: $e');
-      // Return safe defaults
+      // Return safe defaults using the provided threshold
       return NavigationEmbeddingResult(
         embedding: List.filled(768, 0.0),
         peopleDetected: false,
         peopleCount: 0,
         confidenceScores: [],
-        recommendedThreshold: 0.75, // Conservative default
+        recommendedThreshold: fixedThreshold, // Use the provided threshold
       );
     }
   }
@@ -121,19 +132,13 @@ class ClipService {
   double calculateFixedNavigationThreshold({
     required bool recordingHadPeople,
     required int recordingPeopleCount,
+    required double fixedThreshold,
   }) {
-    if (recordingHadPeople) {
-      // Recording had people (inpainted) → Navigation uses raw → Need lower threshold
-      double baseThreshold = 0.75;
-      double reduction = (recordingPeopleCount * 0.02).clamp(0.0, 0.10); // Max 10% reduction
-      double finalThreshold = (baseThreshold - reduction).clamp(0.60, 0.80);
-      debugPrint('Clean-to-raw threshold: ${finalThreshold.toStringAsFixed(2)} (reduced by ${reduction.toStringAsFixed(2)} for ${recordingPeopleCount} people)');
-      return finalThreshold;
-    } else {
-      // Recording had no people (clean) → Navigation also clean → High threshold
-      debugPrint('Clean-to-clean threshold: 0.85');
-      return 0.85;
-    }
+    // Since recording no longer uses inpainting, both recording and navigation use raw images
+    // Use consistent threshold regardless of people presence
+    double threshold = fixedThreshold;
+    debugPrint('Raw-to-raw threshold: ${threshold.toStringAsFixed(2)}');
+    return threshold;
   }
 
   /// Calculate smart navigation threshold based on recording vs navigation people presence
@@ -142,59 +147,65 @@ class ClipService {
     required int recordingPeopleCount,
     required int navigationPeopleCount,
     required List<double> navigationConfidenceScores,
+    required double cleanSceneThreshold,
+    required double peoplePresentThreshold,
+    required double mixedSceneThreshold,
   }) {
     debugPrint('Smart threshold: recording_people=$recordingPeopleCount, navigation_people=$navigationPeopleCount');
     
-    // Case 1: Recording had people (inpainted), navigation has no people
-    // This is the MAIN problem case - clean embedding vs raw embedding
-    if (recordingHadPeople && navigationPeopleCount == 0) {
-      // Need lower threshold to compensate for clean-to-raw mismatch
-      double baseThreshold = 0.75; // Reduced from 0.85
-      // Further reduce based on how many people were in recording
-      double reduction = (recordingPeopleCount * 0.02).clamp(0.0, 0.10);
-      double finalThreshold = baseThreshold - reduction;
-      debugPrint('Clean-to-raw case: threshold=${finalThreshold.toStringAsFixed(2)} (reduced by ${reduction.toStringAsFixed(2)})');
-      return finalThreshold.clamp(0.60, 0.80);
+    // Since both recording and navigation use raw images now, adjust thresholds accordingly
+    
+    // Case 1: Both have no people (ideal case)
+    if (!recordingHadPeople && navigationPeopleCount == 0) {
+      debugPrint('Raw-clean-to-raw-clean case: threshold=${cleanSceneThreshold.toStringAsFixed(2)}');
+      return cleanSceneThreshold; // High confidence for clean comparisons
     }
     
-    // Case 2: Recording had no people, navigation has no people (ideal case)
-    else if (!recordingHadPeople && navigationPeopleCount == 0) {
-      debugPrint('Clean-to-clean case: threshold=0.85');
-      return 0.85; // High confidence for clean comparisons
-    }
-    
-    // Case 3: Recording had people, navigation also has people
+    // Case 2: Both have people
     else if (recordingHadPeople && navigationPeopleCount > 0) {
       // Both sides have people, moderate threshold
       double avgConfidence = navigationConfidenceScores.isNotEmpty 
           ? navigationConfidenceScores.reduce((a, b) => a + b) / navigationConfidenceScores.length 
           : 0.5;
-      double threshold = 0.78 - (avgConfidence * 0.03);
-      debugPrint('People-to-people case: threshold=${threshold.toStringAsFixed(2)}');
+      double threshold = peoplePresentThreshold - (avgConfidence * 0.03);
+      debugPrint('Raw-people-to-raw-people case: threshold=${threshold.toStringAsFixed(2)}');
       return threshold.clamp(0.65, 0.80);
     }
     
-    // Case 4: Recording had no people, navigation has people (rare but possible)
-    else {
+    // Case 3: Recording has no people, navigation has people
+    else if (!recordingHadPeople && navigationPeopleCount > 0) {
       // Clean recording, people in navigation - need lower threshold
-      debugPrint('Clean-to-people case: threshold=0.72');
-      return 0.72;
+      debugPrint('Raw-clean-to-raw-people case: threshold=${mixedSceneThreshold.toStringAsFixed(2)}');
+      return mixedSceneThreshold;
+    }
+    
+    // Case 4: Recording has people, navigation has no people
+    else {
+      // People in recording, clean navigation - need lower threshold
+      debugPrint('Raw-people-to-raw-clean case: threshold=${mixedSceneThreshold.toStringAsFixed(2)}');
+      return mixedSceneThreshold;
     }
   }
 
-  /// Calculate dynamic navigation threshold based on people presence (legacy method)
-  double _calculateNavigationThreshold(int peopleCount, List<double> confidenceScores) {
+  /// Calculate dynamic navigation threshold based on people presence (configurable)
+  double _calculateNavigationThreshold(
+    int peopleCount, 
+    List<double> confidenceScores, {
+    required double cleanSceneThreshold,
+    required double peoplePresentThreshold,
+    required double crowdedSceneThreshold,
+  }) {
     if (peopleCount == 0) {
-      return 0.85; // High confidence needed when comparing clean to clean
+      return cleanSceneThreshold; // Configurable clean scene threshold
     } else if (peopleCount <= 2) {
       // Moderate reduction for 1-2 people
       double avgConfidence = confidenceScores.isNotEmpty 
           ? confidenceScores.reduce((a, b) => a + b) / confidenceScores.length 
           : 0.5;
-      return 0.80 - (avgConfidence * 0.05); // 0.75-0.80 range
+      return peoplePresentThreshold - (avgConfidence * 0.05); // Use configurable base
     } else {
       // Significant reduction for crowds
-      return 0.70; // Lower threshold for crowded scenes
+      return crowdedSceneThreshold; // Configurable crowded scene threshold
     }
   }
 

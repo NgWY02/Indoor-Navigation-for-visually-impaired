@@ -66,11 +66,12 @@ except Exception:
 
 # Stable Diffusion inpainting
 try:
-    from diffusers import StableDiffusionInpaintPipeline, EulerAncestralDiscreteScheduler  # type: ignore
+    from diffusers import StableDiffusionInpaintPipeline, EulerAncestralDiscreteScheduler, DPMSolverMultistepScheduler  # type: ignore
     import torch  # type: ignore
 except Exception:
     StableDiffusionInpaintPipeline = None
     EulerAncestralDiscreteScheduler = None
+    DPMSolverMultistepScheduler = None
 
 # Import the CLIP client
 try:
@@ -247,12 +248,22 @@ def initialize_inpaint_models() -> bool:
                         pass
 
                 try:
-                    if EulerAncestralDiscreteScheduler is not None:
+                    # 🚀 SPEED OPTIMIZATION: Use DPMSolverMultistepScheduler with Karras sigmas for faster convergence
+                    if DPMSolverMultistepScheduler is not None:
+                        _sd_inpaint_pipeline.scheduler = DPMSolverMultistepScheduler.from_config(
+                            _sd_inpaint_pipeline.scheduler.config,
+                            use_karras_sigmas=True,
+                            algorithm_type="dpmsolver++"
+                        )
+                        print("✅ Using DPMSolverMultistepScheduler with Karras sigmas for optimal speed")
+                    elif EulerAncestralDiscreteScheduler is not None:
                         _sd_inpaint_pipeline.scheduler = EulerAncestralDiscreteScheduler.from_config(
                             _sd_inpaint_pipeline.scheduler.config
                         )
-                except Exception:
-                    pass
+                        print("✅ Using EulerAncestralDiscreteScheduler as fallback")
+                except Exception as e:
+                    print(f"⚠️ Scheduler optimization failed: {e}")
+                    # Keep default scheduler if optimization fails
 
                 try:
                     torch.set_float32_matmul_precision("high")
@@ -296,45 +307,66 @@ def _dilate_mask_binary(mask: np.ndarray, kernel_size: int = 15) -> np.ndarray:
 
 
 def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
-    """Use YOLOv8 segmentation to detect and segment people + their carried objects in one step."""
+    """Use YOLOv8 segmentation to detect and segment people + their carried objects ONLY if people are present."""
     if _yolo_model is None:
         return []
-    
+
     try:
         import time
         yolo_start = time.time()
-        
+
         # COCO classes for people and common carried objects
         target_classes = {
             0: 'person',
             24: 'backpack',
-            25: 'umbrella', 
+            25: 'umbrella',
             26: 'handbag',
             28: 'suitcase',
             67: 'cell phone',  # people often hold phones
             73: 'laptop',      # people carry laptops
             76: 'keyboard',    # sometimes carried
         }
-        
+
         results = _yolo_model(img, verbose=False)
         all_masks = []
         detected_objects = []
-        
+        people_detected = False
+
+        # First pass: Check if any people are detected
+        for result in results:
+            if hasattr(result, 'boxes') and result.boxes is not None:
+                boxes = result.boxes
+                for box in boxes:
+                    class_id = int(box.cls)
+                    confidence = float(box.conf)
+
+                    if class_id == 0 and confidence > 0.5:  # Person detected
+                        people_detected = True
+                        break
+                if people_detected:
+                    break
+
+        # If no people detected, don't inpaint any carried objects (they might be stationary)
+        if not people_detected:
+            print("ℹ️ No people detected - skipping inpainting of carried objects to preserve stationary items")
+            return []
+
+        # Second pass: Include people + carried objects only if people are present
         for result in results:
             # Check if segmentation masks are available
             if hasattr(result, 'masks') and result.masks is not None:
                 boxes = result.boxes
                 masks = result.masks
-                
+
                 for i, box in enumerate(boxes):
                     class_id = int(box.cls)
                     confidence = float(box.conf)
-                    
+
                     # Include person + carried objects with appropriate confidence thresholds
                     if class_id in target_classes:
                         # Use higher confidence for people, lower for objects
                         min_confidence = 0.5 if class_id == 0 else 0.4
-                        
+
                         if confidence > min_confidence:
                             # Get the segmentation mask
                             mask = masks.data[i].cpu().numpy()
@@ -345,7 +377,7 @@ def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
                                 mask = np.array(mask_resized)
                             else:
                                 mask = (mask * 255).astype(np.uint8)
-                            
+
                             all_masks.append(mask)
                             detected_objects.append(f"{target_classes[class_id]}({confidence:.2f})")
             else:
@@ -355,17 +387,17 @@ def _get_yolo_person_masks(img: np.ndarray) -> List[np.ndarray]:
                     for box in boxes:
                         class_id = int(box.cls)
                         confidence = float(box.conf)
-                        
+
                         if class_id in target_classes:
                             min_confidence = 0.5 if class_id == 0 else 0.4
-                            
+
                             if confidence > min_confidence:
                                 x1, y1, x2, y2 = [int(coord) for coord in box.xyxy[0].cpu().numpy()]
                                 mask = np.zeros((img.shape[0], img.shape[1]), dtype=np.uint8)
                                 mask[y1:y2, x1:x2] = 255
                                 all_masks.append(mask)
                                 detected_objects.append(f"{target_classes[class_id]}({confidence:.2f})")
-        
+
         yolo_time = time.time() - yolo_start
         objects_str = ", ".join(detected_objects) if detected_objects else "none"
         print(f"🎯 YOLOv8-seg detected: {objects_str} ({yolo_time:.2f}s)")
@@ -504,28 +536,59 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
                 pil_image_roi = pil_image_full.crop((x1, y1, x2, y2))
                 pil_mask_roi = pil_mask_full.crop((x1, y1, x2, y2))
 
-                # BATCH mode: Higher quality settings since we're not real-time
+                # 🚀 SPEED OPTIMIZATION: Adaptive parameters based on ROI size and real-time mode
                 roi_w, roi_h = (x2 - x1), (y2 - y1)
-                if max(roi_w, roi_h) <= 384:
-                    target_size = 512  # Upscale for better quality
-                    sd_steps = 15      # More steps for better results
-                    sd_guidance = 7.5  # Higher guidance for SD 2.0
+                roi_size = max(roi_w, roi_h)
+                
+                # Check real-time mode from environment variable
+                realtime_mode = os.environ.get("SD_REALTIME_MODE", "true").lower() == "true"
+                
+                if realtime_mode:
+                    # ⚡ REAL-TIME MODE: Optimized for speed
+                    if roi_size <= 256:
+                        target_size = 256
+                        sd_steps = 4
+                        sd_guidance = 2.5
+                    elif roi_size <= 384:
+                        target_size = 320
+                        sd_steps = 5
+                        sd_guidance = 3.0
+                    else:
+                        target_size = 384
+                        sd_steps = 5
+                        sd_guidance = 4.0
+                    print(f"⚡ Real-time mode: ROI {roi_size}px -> {target_size}px target, {sd_steps} steps, guidance {sd_guidance}")
                 else:
-                    target_size = 512
-                    sd_steps = 20      # Even more steps for larger areas
-                    sd_guidance = 7.5
+                    # 🎯 QUALITY MODE: Better quality when speed isn't critical
+                    if roi_size <= 384:
+                        target_size = 512
+                        sd_steps = 12
+                        sd_guidance = 6.0
+                    else:
+                        target_size = 512
+                        sd_steps = 15
+                        sd_guidance = 7.5
+                    print(f"🎯 Quality mode: ROI {roi_size}px -> {target_size}px target, {sd_steps} steps, guidance {sd_guidance}")
 
                 # Resize ROI directly (no letterbox) to avoid border lines
                 image_512 = pil_image_roi.resize((target_size, target_size), Image.BICUBIC)
                 # Use NEAREST for mask to keep hard edges; we'll feather later
                 mask_512 = pil_mask_roi.resize((target_size, target_size), Image.NEAREST)
 
-                # Inference (high quality settings for batch processing)
+                # 🚀 SPEED OPTIMIZATION: Simplified prompts for faster processing
+                if realtime_mode:
+                    prompt = "empty space, background"
+                    negative_prompt = "people, objects"
+                else:
+                    prompt = "clean empty hallway, architectural interior, smooth walls, professional lighting, no people"
+                    negative_prompt = "people, persons, humans, crowds, blurry, distorted, artifacts"
+
+                # Inference with optimized parameters
                 start_time = time.time()
                 with torch.no_grad():
                     result = _sd_inpaint_pipeline(
-                        prompt="clean empty hallway, architectural interior, smooth walls, professional lighting, no people",
-                        negative_prompt="people, persons, humans, crowds, blurry, distorted, artifacts",
+                        prompt=prompt,
+                        negative_prompt=negative_prompt,
                         image=image_512,
                         mask_image=mask_512,
                         num_inference_steps=sd_steps,
@@ -538,16 +601,23 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
                 out_512 = result.images[0]
                 out_roi = out_512.resize((x2 - x1, y2 - y1), Image.BICUBIC)
 
-                # Paste back into original using a feathered mask to avoid seams/lines
+                # 🚀 SPEED OPTIMIZATION: Remove Gaussian blur masking for faster compositing
                 composed = pil_image_full.copy()
-                from PIL import ImageFilter
-                paste_mask = pil_mask_roi.resize((x2 - x1, y2 - y1), Image.LANCZOS).convert("L")
-                paste_mask = paste_mask.filter(ImageFilter.GaussianBlur(5))
-                composed.paste(out_roi, (x1, y1), mask=paste_mask)
+                if realtime_mode:
+                    # Fast compositing without blur
+                    paste_mask = pil_mask_roi.resize((x2 - x1, y2 - y1), Image.NEAREST).convert("L")
+                    composed.paste(out_roi, (x1, y1), mask=paste_mask)
+                else:
+                    # Quality compositing with blur for seamless edges
+                    from PIL import ImageFilter
+                    paste_mask = pil_mask_roi.resize((x2 - x1, y2 - y1), Image.LANCZOS).convert("L")
+                    paste_mask = paste_mask.filter(ImageFilter.GaussianBlur(5))
+                    composed.paste(out_roi, (x1, y1), mask=paste_mask)
 
                 inpainted = np.array(composed)
                 used_pipeline = 'stable_diffusion_2'
-                print(f"✅ Inpainted using SD2.0 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)}, {target_size}px, steps={sd_steps})")
+                mode_indicator = "⚡" if realtime_mode else "🎯"
+                print(f"{mode_indicator} Inpainted using SD2.0 + ROI ({inference_time:.2f}s, ROI {(x2-x1)}x{(y2-y1)}, {target_size}px, steps={sd_steps}, guidance={sd_guidance})")
 
             except Exception as e:
                 print(f"⚠️ Stable Diffusion inpainting failed: {e}")
@@ -946,8 +1016,8 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
 
 @app.post("/encode/preprocessed", response_model=EmbeddingResponse)
 async def encode_image_preprocessed(image: UploadFile = File(...)):
-    """Encode image with people removal preprocessing (YOLO+Stable Diffusion) before DINOv2 encoding."""
-    return await encode_image_inpainted(image)
+    """Encode image without preprocessing for path recording."""
+    return await encode_image(image)
 
 
 @app.post("/encode/navigation", response_model=EmbeddingResponse)
@@ -970,29 +1040,46 @@ async def detect_people(image: UploadFile = File(...)):
         all_masks = _get_yolo_person_masks(img)
         people_detected = len(all_masks) > 0
         people_count = len(all_masks)
-        
+
         # Get confidence scores from YOLO detection for people and objects
         confidence_scores = []
         if _yolo_model is not None:
             try:
                 # Target classes for detection
                 target_classes = {0, 24, 25, 26, 28, 67, 73, 76}
-                
+
                 results = _yolo_model(img, verbose=False)
+
+                # First check if people are detected
+                has_people = False
                 for result in results:
                     if hasattr(result, 'boxes') and result.boxes is not None:
                         boxes = result.boxes
                         for box in boxes:
                             class_id = int(box.cls)
                             confidence = float(box.conf)
-                            
-                            if class_id in target_classes:
-                                min_confidence = 0.5 if class_id == 0 else 0.4
-                                if confidence > min_confidence:
-                                    confidence_scores.append(confidence)
+                            if class_id == 0 and confidence > 0.5:  # Person detected
+                                has_people = True
+                                break
+                    if has_people:
+                        break
+
+                # Only include confidence scores if people are present
+                if has_people:
+                    for result in results:
+                        if hasattr(result, 'boxes') and result.boxes is not None:
+                            boxes = result.boxes
+                            for box in boxes:
+                                class_id = int(box.cls)
+                                confidence = float(box.conf)
+
+                                if class_id in target_classes:
+                                    min_confidence = 0.5 if class_id == 0 else 0.4
+                                    if confidence > min_confidence:
+                                        confidence_scores.append(confidence)
             except Exception as e:
                 print(f"⚠️ Error getting confidence scores: {e}")
-        
+
         return PeopleDetectionResponse(
             people_detected=people_detected,
             people_count=people_count,
@@ -1097,7 +1184,7 @@ async def root():
             "encode_image": "/encode (POST with image file)",
             "encode_text": "/encode/text (POST with JSON body)",
             "encode_image_inpainted": "/encode/inpainted (POST with image file; YOLO+Stable Diffusion preprocessed)",
-            "encode_image_preprocessed": "/encode/preprocessed (POST with image file; YOLO+Stable Diffusion preprocessed - for recording)",
+            "encode_image_preprocessed": "/encode/preprocessed (POST with image file; raw encoding - for recording)",
             "encode_image_navigation": "/encode/navigation (POST with image file; raw DINOv2 - for real-time navigation)",
             "detect_people": "/detect/people (POST with image file; YOLO people detection only)"
         }

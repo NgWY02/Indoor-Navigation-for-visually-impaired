@@ -51,6 +51,10 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   List<String> _directionNames = ['North', 'East', 'South', 'West'];
   List<File> _capturedFrames = [];
   int _currentDirectionIndex = 0;
+  
+  // Localization result display
+  String? _localizationResult;
+  bool _showLocalizationResult = false;
 
   @override
   void initState() {
@@ -184,6 +188,20 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     await _startLocalizationProcess();
   }
 
+  Future<void> _startLocalizationProcess() async {
+    setState(() {
+      _screenState = NavigationScreenState.capturingDirections;
+      _capturedDirections = [];
+      _capturedFrames = [];
+      _directionNames = ['North', 'East', 'South', 'West'];
+      _currentDirectionIndex = 0;
+      _statusMessage = 'Point camera towards North and tap "Capture North"';
+      // Clear previous localization result
+      _localizationResult = null;
+      _showLocalizationResult = false;
+    });
+  }
+
   Future<void> _loadAvailableRoutes() async {
     if (_currentLocation == null) return;
 
@@ -221,6 +239,9 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     setState(() {
       _screenState = NavigationScreenState.navigating;
       _statusMessage = 'Starting navigation...';
+      // Clear localization result when navigation starts
+      _localizationResult = null;
+      _showLocalizationResult = false;
     });
 
     await _navigationService.startNavigation(_selectedRoute!);
@@ -304,6 +325,15 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
             // Full screen camera preview
             _buildCameraPreview(),
 
+            // Localization result display at top - hide during navigation
+            if (_showLocalizationResult && _screenState != NavigationScreenState.navigating)
+              Positioned(
+                top: 0,
+                left: 0,
+                right: 0,
+                child: _buildLocalizationResultDisplay(),
+              ),
+
             // Overlay control panel at bottom
             Positioned(
               left: 0,
@@ -342,17 +372,52 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         children: [
           CameraPreview(_cameraController!),
 
-          // Debug overlay
-          DebugOverlay(
-            debugInfo: _debugInfo,
-            isVisible: _isDebugVisible,
-            onToggle: () {
-              setState(() {
-                _isDebugVisible = !_isDebugVisible;
-              });
-            },
-          ),
+          // Debug overlay - only show during navigation
+          if (_screenState == NavigationScreenState.navigating)
+            DebugOverlay(
+              debugInfo: _debugInfo,
+              isVisible: true,  // Always show during navigation
+              onToggle: () {
+                setState(() {
+                  _isDebugVisible = !_isDebugVisible;
+                });
+              },
+            ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildLocalizationResultDisplay() {
+    return Container(
+      padding: EdgeInsets.all(16),
+      child: SafeArea(
+        child: Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha:0.4),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha:0.1),
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  _localizationResult ?? 'Processing...',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -867,17 +932,6 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     }
   }
 
-  Future<void> _startLocalizationProcess() async {
-    setState(() {
-      _screenState = NavigationScreenState.capturingDirections;
-      _capturedDirections = [];
-      _capturedFrames = [];
-      _directionNames = ['North', 'East', 'South', 'West'];
-      _currentDirectionIndex = 0;
-      _statusMessage = 'Point camera towards North and tap "Capture North"';
-    });
-  }
-
   Future<void> _captureDirection() async {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
       _onError('Camera not ready');
@@ -928,17 +982,25 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
       if (location != null) {
         _currentLocation = location;
+        setState(() {
+          _localizationResult = '📍 ${location.nodeName} (${(location.similarity * 100).round()}% similarity)';
+          _showLocalizationResult = true;
+        });
         await _loadAvailableRoutes();
       } else {
         setState(() {
           _screenState = NavigationScreenState.readyToLocalize;
           _statusMessage = 'Unable to determine location. Please try again from a different position.';
+          _localizationResult = '❌ No location found';
+          _showLocalizationResult = true;
         });
       }
     } catch (e) {
       _onError('Failed to process directions: $e');
       setState(() {
         _screenState = NavigationScreenState.readyToLocalize;
+        _localizationResult = '❌ No location found';
+        _showLocalizationResult = true;
       });
     }
   }
