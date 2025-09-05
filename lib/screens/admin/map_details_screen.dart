@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:camera/camera.dart';
 import '../../services/supabase_service.dart';
 import 'node_capture.dart'; 
 import '../../services/map_service.dart'; 
-import 'path_recording_screen.dart';
 import 'dart:ui' as ui;
 import 'dart:math';
 
@@ -22,13 +20,14 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   late Future<Map<String, dynamic>> _mapDetailsFuture;
   Map<String, dynamic>? _currentMapData;
   
-  // Connection mode state
-  bool _isConnectionMode = false;
-  String? _selectedStartNodeId;
-  String? _selectedEndNodeId;
   List<Map<String, dynamic>> _connections = [];
   bool _isLoadingConnections = false;
   String? _selectedConnectionId;
+  
+  // Node repositioning state
+  bool _isRepositioningMode = false;
+  String? _repositioningNodeId;
+  String? _repositioningNodeName;
 
   @override
   void initState() {
@@ -170,6 +169,73 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     }
   }
 
+  Future<void> _showEditNameDialog(String nodeId, String currentName) async {
+    final TextEditingController nameController = TextEditingController(text: currentName);
+
+    final String? newName = await showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Edit Node Name'),
+          content: TextField(
+            controller: nameController,
+            decoration: InputDecoration(
+              labelText: 'Node Name',
+              hintText: 'Enter new node name',
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                final name = nameController.text.trim();
+                if (name.isNotEmpty) {
+                  Navigator.of(context).pop(name);
+                }
+              },
+              child: Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (newName != null && newName != currentName) {
+      try {
+        // Get current node data to preserve position
+        final currentNode = _currentMapData?['map_nodes']?.firstWhere(
+          (node) => node['id'] == nodeId,
+          orElse: () => null,
+        );
+
+        if (currentNode == null) {
+          throw Exception('Node not found');
+        }
+
+        final x = currentNode['x_position'];
+        final y = currentNode['y_position'];
+
+        await _supabaseService.updateMapNode(nodeId, newName, x, y);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Node name updated successfully')),
+          );
+          _loadMapDetails();
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error updating node name: $e')),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _navigateToNodeCapture({String? nodeId}) async {
     final result = await Navigator.push(
       context,
@@ -180,10 +246,28 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
         ),
       ),
     );
-    
+
     if (result == true && mounted) {
       print("Node edit/add successful (result=true). Triggering refresh...");
-      _loadMapDetails(); 
+      _loadMapDetails();
+    }
+  }
+
+  Future<void> _navigateToPathRecording({String? nodeId}) async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => NodeCapture(
+          mapId: widget.mapId,
+          nodeId: nodeId,
+          startInVideoMode: true,
+        ),
+      ),
+    );
+
+    if (result == true && mounted) {
+      print("Video recording successful (result=true). Triggering refresh...");
+      _loadMapDetails();
     }
   }
 
@@ -229,43 +313,130 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     }
   }
 
-  void _toggleConnectionMode() {
+  void _startNodeRepositioning(String nodeId, String nodeName) {
     setState(() {
-      _isConnectionMode = !_isConnectionMode;
-      _selectedStartNodeId = null;
-      _selectedEndNodeId = null;
+      _isRepositioningMode = true;
+      _repositioningNodeId = nodeId;
+      _repositioningNodeName = nodeName;
     });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Tap on the map to set new position for "$nodeName"'),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _cancelNodeRepositioning() {
+    setState(() {
+      _isRepositioningMode = false;
+      _repositioningNodeId = null;
+      _repositioningNodeName = null;
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Node repositioning cancelled')),
+    );
+  }
+
+  Future<void> _updateNodePosition(String nodeId, double newX, double newY) async {
+    try {
+      // Get the current node data to preserve the name
+      final currentNode = _currentMapData?['map_nodes']?.firstWhere(
+        (node) => node['id'] == nodeId,
+        orElse: () => null,
+      );
+
+      if (currentNode == null) {
+        throw Exception('Node not found');
+      }
+
+      final nodeName = currentNode['name'] ?? 'Unnamed Node';
+      await _supabaseService.updateMapNode(nodeId, nodeName, newX, newY);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Node position updated successfully')),
+        );
+        _loadMapDetails();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating node position: $e')),
+        );
+      }
+    }
   }
 
   void _onNodeTapped(String nodeId, String nodeName) {
-    if (!_isConnectionMode) return;
-
-    setState(() {
-      if (_selectedStartNodeId == null) {
-        _selectedStartNodeId = nodeId;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Start node selected: $nodeName. Now select destination node.'),
-            duration: const Duration(seconds: 2),
-          ),
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text('Node Options'),
+          content: Text('What would you like to do with "$nodeName"?'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _startNodeRepositioning(nodeId, nodeName);
+              },
+              child: Text('Move Position'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _showEditNameDialog(nodeId, nodeName);
+              },
+              child: Text('Edit Name'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _navigateToPathRecording(nodeId: nodeId);
+              },
+              child: Text('Record Video'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                _deleteNode(nodeId, nodeName);
+              },
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: Text('Delete'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text('Cancel'),
+            ),
+          ],
         );
-      } else if (_selectedEndNodeId == null && nodeId != _selectedStartNodeId) {
-        _selectedEndNodeId = nodeId;
-        _showConnectionDialog();
-      } else if (nodeId == _selectedStartNodeId) {
-        _selectedStartNodeId = null;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Connection cancelled. Select start node again.'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-    });
+      },
+    );
   }
 
   void _onMapTapped(TapUpDetails details, double mapWidth, double mapHeight, double scaleX, double scaleY) {
     final tapPosition = details.localPosition;
+    
+    // Handle repositioning mode
+    if (_isRepositioningMode && _repositioningNodeId != null) {
+      // Convert tap position to map coordinates
+      final mapX = tapPosition.dx / scaleX;
+      final mapY = tapPosition.dy / scaleY;
+      
+      // Update node position
+      _updateNodePosition(_repositioningNodeId!, mapX, mapY);
+      
+      // Exit repositioning mode
+      setState(() {
+        _isRepositioningMode = false;
+        _repositioningNodeId = null;
+        _repositioningNodeName = null;
+      });
+      
+      return;
+    }
     
     // Check if tap is near any connection line
     for (final connection in _connections) {
@@ -390,23 +561,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     });
   }
 
-  void _showConnectionDialog() {
-    final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
-    final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
-    
-    showDialog(
-      context: context,
-      builder: (context) => ConnectionDialog(
-        startNodeName: startNode['name'],
-        endNodeName: endNode['name'],
-        onRecordPath: () async {
-          Navigator.of(context).pop(); // Close dialog first
-          await _startPathRecording();
-        },
-      ),
-    );
-  }
-
   Future<void> _deleteConnection(String connectionId) async {
     // Check if the connection exists
     try {
@@ -468,69 +622,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     }
   }
 
-  Future<void> _startPathRecording() async {
-    if (_selectedStartNodeId == null || _selectedEndNodeId == null) return;
-    
-    try {
-      // Get available cameras
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('No camera available for path recording'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      // Get node details for the recording
-      final startNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedStartNodeId);
-      final endNode = _currentMapData!['map_nodes'].firstWhere((node) => node['id'] == _selectedEndNodeId);
-      
-      // Navigate to path recording screen
-      final result = await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (context) => PathRecordingScreen(
-            camera: cameras.first,
-            startLocationId: _selectedStartNodeId!,
-            endLocationId: _selectedEndNodeId!,
-            startLocationName: startNode['name'],
-            endLocationName: endNode['name'],
-          ),
-        ),
-      );
-
-      // Reset selection and reload connections
-      if (mounted) {
-        setState(() {
-          _selectedStartNodeId = null;
-          _selectedEndNodeId = null;
-        });
-        
-        _loadConnections();
-        
-        if (result != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Path recorded successfully!'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error starting path recording: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final screenSize = MediaQuery.of(context).size;
@@ -558,6 +649,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           },
         ),
         backgroundColor: Colors.teal,
+        foregroundColor: Colors.white,
         actions: _buildResponsiveActions(),
       ),
       body: SafeArea(
@@ -595,18 +687,53 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                 final List<dynamic> nodes = mapData['map_nodes'] ?? [];
 
                 // Mobile layout only
-                return Column(
+                return Stack(
                   children: [
-                    if (_isConnectionMode) _buildConnectionModeHeader(),
-                    Expanded(
-                      flex: screenSize.height > 700 ? 3 : 2,
-                      child: _buildMapView(nodes, context),
+                    Column(
+                      children: [
+                        Expanded(
+                          flex: screenSize.height > 700 ? 3 : 2,
+                          child: _buildMapView(nodes, context),
+                        ),
+                        Expanded(
+                          flex: screenSize.height > 700 ? 2 : 3,
+                          child: _buildDetailsPanel(nodes, context),
+                        ),
+                        SizedBox(height: bottomPadding),
+                      ],
                     ),
-                    Expanded(
-                      flex: screenSize.height > 700 ? 2 : 3,
-                      child: _buildDetailsPanel(nodes, context),
-                    ),
-                    SizedBox(height: bottomPadding),
+                    if (_isRepositioningMode)
+                      Positioned(
+                        top: 16,
+                        left: 16,
+                        right: 16,
+                        child: Container(
+                          padding: EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withOpacity(0.9),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.location_on, color: Colors.white),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Tap on map to reposition "${_repositioningNodeName ?? "node"}"',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: _cancelNodeRepositioning,
+                                child: Text(
+                                  'Cancel',
+                                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 );
               },
@@ -616,48 +743,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   }
 
   List<Widget> _buildResponsiveActions() {
-    final actions = [
-      TextButton.icon(
-        icon: Icon(
-          _isConnectionMode ? Icons.link_off : Icons.link,
-          color: _isConnectionMode ? Colors.orange[800] : null,
-          size: 20,
-        ),
-        label: Text(
-          _isConnectionMode ? 'Exit' : 'Connect',
-          style: TextStyle(
-            color: _isConnectionMode ? Colors.orange[800] : null,
-            fontSize: 18,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        onPressed: _toggleConnectionMode,
-        style: TextButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        ),
-      ),
-    ];
-
-    return actions;
-  }
-
-  Widget _buildConnectionModeHeader() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
-      color: Colors.orange.withValues(alpha: 0.1),
-      child: Text(
-        _selectedStartNodeId == null
-          ? 'Connection Mode: Tap a node to select start point'
-          : 'Connection Mode: Tap another node to create connection',
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.orange,
-          fontSize: 16,
-        ),
-        textAlign: TextAlign.center,
-      ),
-    );
+    return [];
   }
 
   Widget _buildMapView(List<dynamic> nodes, BuildContext context) {
@@ -727,66 +813,209 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   }
 
   Widget _buildDetailsPanel(List<dynamic> nodes, BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Column(
-        children: [
-          Container(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.3),
-                  blurRadius: 4,
-                  offset: const Offset(0, -2),
-                ),
-              ],
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(16.0),
-                topRight: Radius.circular(16.0),
+    if (nodes.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.location_off,
+                size: 48,
+                color: Colors.grey,
               ),
-            ),
-            child: TabBar(
-              tabs: [
-                Tab(
-                  text: 'Nodes',
-                  icon: Icon(
-                    Icons.location_on,
-                    size: 20,
-                  ),
+              const SizedBox(height: 12),
+              Text(
+                'No nodes added to this map yet.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey[600],
                 ),
-                Tab(
-                  text: 'Connections',
-                  icon: Icon(
-                    Icons.link,
-                    size: 20,
-                  ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Tap the + button to add your first node.',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Colors.grey[500],
                 ),
-              ],
-              labelStyle: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
+                textAlign: TextAlign.center,
               ),
-              unselectedLabelStyle: TextStyle(
-                fontSize: 12,
-              ),
-            ),
+            ],
           ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                _buildNodesTab(nodes),
-                _buildConnectionsTab(),
-              ],
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(16.0),
+          topRight: Radius.circular(16.0),
+        ),
+      ),
+      child: ListView.builder(
+        padding: const EdgeInsets.all(8.0),
+        itemCount: nodes.length,
+        itemBuilder: (context, index) {
+          final node = nodes[index];
+          final nodeName = node['name'] ?? 'Unnamed Node';
+          final nodeId = node['id'];
+
+          return Card(
+            margin: const EdgeInsets.symmetric(
+              vertical: 4.0,
+              horizontal: 8.0,
             ),
-          ),
-        ],
+            elevation: 2,
+            child: InkWell(
+              onTap: null,
+              child: IntrinsicHeight(
+                child: Row(
+                  children: [
+                    // Leading CircleAvatar
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: CircleAvatar(
+                        backgroundColor: Colors.blue,
+                        radius: 14,
+                        child: Text(
+                          (index + 1).toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // Title and subtitle - takes remaining space
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 8.0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              nodeName,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Node ${index + 1}',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // Trailing buttons - super simple and compact
+                    Container(
+                      width: 50,
+                      child: PopupMenuButton<String>(
+                          icon: Icon(
+                            Icons.more_vert,
+                              size: 16,
+                              color: Colors.grey[600],
+                            ),
+                            padding: EdgeInsets.zero,
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _navigateToNodeCapture(nodeId: nodeId);
+                              } else if (value == 'delete') {
+                                _deleteNode(nodeId, nodeName);
+                              }
+                            },
+                            itemBuilder: (context) => [
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.edit, size: 16, color: Colors.blue),
+                                    SizedBox(width: 8),
+                                    Text('Edit'),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.delete, size: 16, color: Colors.red),
+                                    SizedBox(width: 8),
+                                    Text('Delete'),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
 
-  Widget _buildNodesTab(List<dynamic> nodes) {
-    if (nodes.isEmpty) {
+  Widget _buildNodeMarker(dynamic node, int index, double scaleX, double scaleY) {
+    final double x = (node['x_position'] as num).toDouble();
+    final double y = (node['y_position'] as num).toDouble();
+    final String nodeId = node['id'];
+    
+    final double displayX = x * scaleX;
+    final double displayY = y * scaleY;
+    
+    return Positioned(
+      left: displayX - 15,
+      top: displayY - 15,
+      child: GestureDetector(
+        onTap: () => _onNodeTapped(nodeId, node['name'] ?? 'Node $index'),
+        child: Tooltip(
+          message: node['name'] ?? 'Node $index',
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.blue,
+              border: Border.all(
+                color: Colors.white,
+                width: 2,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.3),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(16.0),
@@ -837,9 +1066,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           ),
           elevation: 2,
           child: InkWell(
-            onTap: _isConnectionMode
-              ? () => _onNodeTapped(nodeId, nodeName)
-              : null,
+            onTap: null,
             child: IntrinsicHeight(
               child: Row(
                 children: [
@@ -847,9 +1074,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   Padding(
                     padding: const EdgeInsets.all(8.0),
                     child: CircleAvatar(
-                      backgroundColor: _isConnectionMode && nodeId == _selectedStartNodeId
-                          ? Colors.orange
-                          : Colors.blue,
+                      backgroundColor: Colors.blue,
                       radius: 14,
                       child: Text(
                         (index + 1).toString(),
@@ -897,15 +1122,9 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   // Trailing buttons - super simple and compact
                   Container(
                     width: 50,
-                    child: _isConnectionMode
-                      ? const Icon(
-                          Icons.touch_app,
-                          color: Colors.orange,
-                          size: 16,
-                        )
-                      : PopupMenuButton<String>(
-                          icon: Icon(
-                            Icons.more_vert,
+                    child: PopupMenuButton<String>(
+                        icon: Icon(
+                          Icons.more_vert,
                             size: 16,
                             color: Colors.grey[600],
                           ),
@@ -952,7 +1171,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     );
   }
 
-  Widget _buildConnectionsTab() {
+  Widget _buildNodeMarker(dynamic node, int index, double scaleX, double scaleY) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final screenSize = MediaQuery.of(context).size;
@@ -1070,8 +1289,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     final double displayX = x * scaleX;
     final double displayY = y * scaleY;
     
-    bool isSelected = _isConnectionMode && nodeId == _selectedStartNodeId;
-    
     return Positioned(
       left: displayX - 15,
       top: displayY - 15,
@@ -1084,7 +1301,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
             height: 30,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isSelected ? Colors.orange : Colors.blue,
+              color: Colors.blue,
               border: Border.all(
                 color: Colors.white,
                 width: 2,
@@ -1096,16 +1313,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   offset: const Offset(0, 2),
                 ),
               ],
-            ),
-            child: Center(
-              child: Text(
-                '$index',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
             ),
           ),
         ),
