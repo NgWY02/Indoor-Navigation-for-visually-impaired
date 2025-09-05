@@ -483,7 +483,7 @@ class _MapManagementState extends State<MapManagement> {
                             child: ElevatedButton.icon(
                               onPressed: _viewMapDetails,
                               icon: const Icon(Icons.manage_search, size: 18),
-                              label: const Text('Edit Nodes'),
+                              label: const Text('Edit Nodes/Edges'),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.teal,
                                 foregroundColor: Colors.white,

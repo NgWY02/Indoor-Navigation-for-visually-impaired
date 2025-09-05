@@ -302,33 +302,7 @@ class _NodeConnectionScreenState extends State<NodeConnectionScreen> {
         ),
         backgroundColor: Colors.orange,
         foregroundColor: Colors.white,
-        actions: [
-          TextButton.icon(
-            icon: Icon(
-              Icons.link,
-              color: Colors.white,
-              size: 20,
-            ),
-            label: Text(
-              'Connect',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            onPressed: () {
-              setState(() {
-                _isConnectionMode = !_isConnectionMode;
-                _selectedStartNodeId = null;
-                _selectedEndNodeId = null;
-              });
-            },
-            style: TextButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            ),
-          ),
-        ],
+        actions: [],
       ),
       body: SafeArea(
         child: FutureBuilder<Map<String, dynamic>>(
@@ -486,7 +460,7 @@ class _NodeConnectionScreenState extends State<NodeConnectionScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -544,7 +518,7 @@ class MapWithConnectionsPainter extends CustomPainter {
 
         // All connections are recorded paths - use green
         final connectionPaint = Paint()
-          ..color = Colors.green.withOpacity(0.7)
+          ..color = Colors.green.withValues(alpha: 0.7)
           ..strokeWidth = 3.5
           ..style = PaintingStyle.stroke;
 

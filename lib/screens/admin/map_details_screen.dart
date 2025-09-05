@@ -21,13 +21,15 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   Map<String, dynamic>? _currentMapData;
   
   List<Map<String, dynamic>> _connections = [];
-  bool _isLoadingConnections = false;
   String? _selectedConnectionId;
   
   // Node repositioning state
   bool _isRepositioningMode = false;
   String? _repositioningNodeId;
   String? _repositioningNodeName;
+
+  // Map rotation state
+  int _rotationDegrees = 0; // 0, 90, 180, 270 degrees
 
   @override
   void initState() {
@@ -70,10 +72,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
   Future<void> _loadConnections() async {
     print('=== _loadConnections() called ===');
-    setState(() {
-      _isLoadingConnections = true;
-    });
-    
     try {
       // Ensure we have current map data
       if (_currentMapData == null) {
@@ -152,16 +150,11 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           
           print('Total matched paths for this map: $matchedPaths');
           print('Total connections to display: ${_connections.length}');
-          
-          _isLoadingConnections = false;
         });
       }
     } catch (e) {
       print('Error loading connections: $e');
       if (mounted) {
-        setState(() {
-          _isLoadingConnections = false;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading connections: $e')),
         );
@@ -233,23 +226,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
           );
         }
       }
-    }
-  }
-
-  Future<void> _navigateToNodeCapture({String? nodeId}) async {
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => NodeCapture(
-          mapId: widget.mapId,
-          nodeId: nodeId,
-        ),
-      ),
-    );
-
-    if (result == true && mounted) {
-      print("Node edit/add successful (result=true). Triggering refresh...");
-      _loadMapDetails();
     }
   }
 
@@ -338,6 +314,12 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Node repositioning cancelled')),
     );
+  }
+
+  void _rotateMap() {
+    setState(() {
+      _rotationDegrees = (_rotationDegrees + 90) % 360;
+    });
   }
 
   Future<void> _updateNodePosition(String nodeId, double newX, double newY) async {
@@ -624,7 +606,6 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
     
     return Scaffold(
@@ -691,13 +672,9 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                   children: [
                     Column(
                       children: [
+                        _buildInstructionHeader(),
                         Expanded(
-                          flex: screenSize.height > 700 ? 3 : 2,
                           child: _buildMapView(nodes, context),
-                        ),
-                        Expanded(
-                          flex: screenSize.height > 700 ? 2 : 3,
-                          child: _buildDetailsPanel(nodes, context),
                         ),
                         SizedBox(height: bottomPadding),
                       ],
@@ -710,7 +687,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
                         child: Container(
                           padding: EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.blue.withOpacity(0.9),
+                            color: Colors.blue.withValues(alpha: 0.9),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
@@ -743,7 +720,30 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
   }
 
   List<Widget> _buildResponsiveActions() {
-    return [];
+    return [
+      IconButton(
+        icon: Icon(Icons.rotate_right, color: Colors.white),
+        onPressed: _rotateMap,
+        tooltip: 'Rotate Map',
+      ),
+    ];
+  }
+
+  Widget _buildInstructionHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 6.0),
+      color: Colors.teal.withValues(alpha: 0.1),
+      child: const Text(
+        'Tap node to edit • Tap edge to delete',
+        style: TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Colors.teal,
+          fontSize: 14,
+        ),
+        textAlign: TextAlign.center,
+      ),
+    );
   }
 
   Widget _buildMapView(List<dynamic> nodes, BuildContext context) {
@@ -755,18 +755,39 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
       padding: EdgeInsets.all(8.0),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final double mapAspectRatio = _mapService.mapUIImage!.width / _mapService.mapUIImage!.height;
+          // Adjust aspect ratio based on rotation
+          final bool isRotated = _rotationDegrees == 90 || _rotationDegrees == 270;
+          final double originalWidth = _mapService.mapUIImage!.width.toDouble();
+          final double originalHeight = _mapService.mapUIImage!.height.toDouble();
+          
+          // For rotation, we need to consider the effective dimensions
+          final double effectiveWidth = isRotated ? originalHeight : originalWidth;
+          final double effectiveHeight = isRotated ? originalWidth : originalHeight;
+          final double mapAspectRatio = effectiveWidth / effectiveHeight;
           
           final containerWidth = constraints.maxWidth;
           final containerHeight = constraints.maxHeight;
           
           final double targetWidth, targetHeight;
-          if (containerWidth / containerHeight > mapAspectRatio) {
-            targetHeight = containerHeight;
-            targetWidth = containerHeight * mapAspectRatio;
-          } else {
-            targetWidth = containerWidth;
-            targetHeight = containerWidth / mapAspectRatio;
+          
+          // Calculate the natural size (1:1 pixel ratio) for the rotated image
+          final double naturalWidth = effectiveWidth;
+          final double naturalHeight = effectiveHeight;
+          
+          // If natural size fits within container, use natural size
+          if (naturalWidth <= containerWidth && naturalHeight <= containerHeight) {
+            targetWidth = naturalWidth;
+            targetHeight = naturalHeight;
+          } 
+          // If natural size is too big, scale down to fit
+          else {
+            if (containerWidth / containerHeight > mapAspectRatio) {
+              targetHeight = containerHeight;
+              targetWidth = containerHeight * mapAspectRatio;
+            } else {
+              targetWidth = containerWidth;
+              targetHeight = containerWidth / mapAspectRatio;
+            }
           }
           
           final scaleX = targetWidth / _mapService.mapUIImage!.width;
@@ -779,196 +800,33 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
               child: InteractiveViewer(
                 minScale: 0.5,
                 maxScale: 3.0,
-                child: Stack(
-                  children: [
-                    // Map image with connections
-                    SizedBox(
-                      width: targetWidth,
-                      height: targetHeight,
-                      child: GestureDetector(
-                        onTapUp: (details) => _onMapTapped(details, targetWidth, targetHeight, scaleX, scaleY),
-                        child: CustomPaint(
-                          painter: MapWithConnectionsPainter(
-                            mapImage: _mapService.mapUIImage!,
-                            nodes: nodes,
-                            connections: _connections,
-                            selectedConnectionId: _selectedConnectionId,
-                          ),
-                          child: Container(),
-                        ),
-                      ),
-                    ),
-                    
-                    // Interactive node markers
-                    for (int i = 0; i < nodes.length; i++) 
-                      _buildNodeMarker(nodes[i], i + 1, scaleX, scaleY),
-                  ],
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildDetailsPanel(List<dynamic> nodes, BuildContext context) {
-    if (nodes.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.location_off,
-                size: 48,
-                color: Colors.grey,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'No nodes added to this map yet.',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tap the + button to add your first node.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[500],
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.only(
-          topLeft: Radius.circular(16.0),
-          topRight: Radius.circular(16.0),
-        ),
-      ),
-      child: ListView.builder(
-        padding: const EdgeInsets.all(8.0),
-        itemCount: nodes.length,
-        itemBuilder: (context, index) {
-          final node = nodes[index];
-          final nodeName = node['name'] ?? 'Unnamed Node';
-          final nodeId = node['id'];
-
-          return Card(
-            margin: const EdgeInsets.symmetric(
-              vertical: 4.0,
-              horizontal: 8.0,
-            ),
-            elevation: 2,
-            child: InkWell(
-              onTap: null,
-              child: IntrinsicHeight(
-                child: Row(
-                  children: [
-                    // Leading CircleAvatar
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: CircleAvatar(
-                        backgroundColor: Colors.blue,
-                        radius: 14,
-                        child: Text(
-                          (index + 1).toString(),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.bold,
+                child: RotatedBox(
+                  quarterTurns: _rotationDegrees ~/ 90,
+                  child: Stack(
+                    children: [
+                      // Map image with connections
+                      SizedBox(
+                        width: originalWidth,
+                        height: originalHeight,
+                        child: GestureDetector(
+                          onTapUp: (details) => _onMapTapped(details, targetWidth, targetHeight, scaleX, scaleY),
+                          child: CustomPaint(
+                            painter: MapWithConnectionsPainter(
+                              mapImage: _mapService.mapUIImage!,
+                              nodes: nodes,
+                              connections: _connections,
+                              selectedConnectionId: _selectedConnectionId,
+                            ),
+                            child: Container(),
                           ),
                         ),
                       ),
-                    ),
-
-                    // Title and subtitle - takes remaining space
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 8.0,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(
-                              nodeName,
-                              style: const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Node ${index + 1}',
-                              style: TextStyle(
-                                fontSize: 10,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    // Trailing buttons - super simple and compact
-                    Container(
-                      width: 50,
-                      child: PopupMenuButton<String>(
-                          icon: Icon(
-                            Icons.more_vert,
-                              size: 16,
-                              color: Colors.grey[600],
-                            ),
-                            padding: EdgeInsets.zero,
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                _navigateToNodeCapture(nodeId: nodeId);
-                              } else if (value == 'delete') {
-                                _deleteNode(nodeId, nodeName);
-                              }
-                            },
-                            itemBuilder: (context) => [
-                              PopupMenuItem(
-                                value: 'edit',
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.edit, size: 16, color: Colors.blue),
-                                    SizedBox(width: 8),
-                                    Text('Edit'),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.delete, size: 16, color: Colors.red),
-                                    SizedBox(width: 8),
-                                    Text('Delete'),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                    ),
-                  ],
+                      
+                      // Interactive node markers
+                      for (int i = 0; i < nodes.length; i++) 
+                        _buildNodeMarker(nodes[i], i + 1, scaleX, scaleY),
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -1005,310 +863,7 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
-                  blurRadius: 4,
-                  offset: const Offset(0, 2),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                Icons.location_off,
-                size: 48,
-                color: Colors.grey,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'No nodes added to this map yet.',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey[600],
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Tap the + button to add your first node.',
-                style: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey[500],
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(8.0),
-      itemCount: nodes.length,
-      itemBuilder: (context, index) {
-        final node = nodes[index];
-        final nodeName = node['name'] ?? 'Unnamed Node';
-        final nodeId = node['id'];
-
-        return Card(
-          margin: const EdgeInsets.symmetric(
-            vertical: 2.0,
-            horizontal: 2.0,
-          ),
-          elevation: 2,
-          child: InkWell(
-            onTap: null,
-            child: IntrinsicHeight(
-              child: Row(
-                children: [
-                  // Leading CircleAvatar
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: CircleAvatar(
-                      backgroundColor: Colors.blue,
-                      radius: 14,
-                      child: Text(
-                        (index + 1).toString(),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  // Title and subtitle - takes remaining space
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        vertical: 8.0,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            nodeName,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 1,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Node ${index + 1}',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  // Trailing buttons - super simple and compact
-                  Container(
-                    width: 50,
-                    child: PopupMenuButton<String>(
-                        icon: Icon(
-                          Icons.more_vert,
-                            size: 16,
-                            color: Colors.grey[600],
-                          ),
-                          padding: EdgeInsets.zero,
-                          onSelected: (value) {
-                            if (value == 'edit') {
-                              _navigateToNodeCapture(nodeId: nodeId);
-                            } else if (value == 'delete') {
-                              _deleteNode(nodeId, nodeName);
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            PopupMenuItem(
-                              value: 'edit',
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.edit, size: 16, color: Colors.blue),
-                                  SizedBox(width: 8),
-                                  Text('Edit'),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: 'delete',
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.delete, size: 16, color: Colors.red),
-                                  SizedBox(width: 8),
-                                  Text('Delete'),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildNodeMarker(dynamic node, int index, double scaleX, double scaleY) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenSize = MediaQuery.of(context).size;
-        final isMobile = screenSize.width < 600;
-        
-        if (_isLoadingConnections) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (_connections.isEmpty) {
-          return Center(
-            child: Padding(
-              padding: EdgeInsets.all(isMobile ? 16.0 : 24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.link_off,
-                    size: isMobile ? 48 : 64,
-                    color: Colors.grey,
-                  ),
-                  SizedBox(height: isMobile ? 12 : 16),
-                  Text(
-                    'No connections created yet.',
-                    style: TextStyle(
-                      fontSize: isMobile ? 16 : 18,
-                      color: Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        return ListView.builder(
-          padding: EdgeInsets.all(isMobile ? 8.0 : 12.0),
-          itemCount: _connections.length,
-          itemBuilder: (context, index) {
-            final connection = _connections[index];
-            final nodeA = _currentMapData!['map_nodes'].firstWhere(
-              (node) => node['id'] == connection['node_a_id'],
-              orElse: () => {'name': 'Unknown'},
-            );
-            final nodeB = _currentMapData!['map_nodes'].firstWhere(
-              (node) => node['id'] == connection['node_b_id'],
-              orElse: () => {'name': 'Unknown'},
-            );
-
-            return Card(
-              margin: EdgeInsets.symmetric(
-                vertical: isMobile ? 2.0 : 4.0,
-                horizontal: isMobile ? 4.0 : 8.0,
-              ),
-              color: connection['id'] == _selectedConnectionId 
-                  ? Colors.red.withOpacity(0.1) 
-                  : null,
-              elevation: 2,
-              child: ListTile(
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 12.0 : 16.0,
-                  vertical: isMobile ? 4.0 : 8.0,
-                ),
-                leading: Icon(
-                  Icons.route,
-                  color: connection['id'] == _selectedConnectionId 
-                      ? Colors.red 
-                      : Colors.green,
-                  size: isMobile ? 18 : 22,
-                ),
-                title: Text(
-                  '${nodeA['name']} → ${nodeB['name']}',
-                  style: TextStyle(
-                    fontSize: isMobile ? 13 : 15,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-                trailing: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: isMobile ? 40 : 48,
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      Icons.delete,
-                      color: Colors.red,
-                      size: isMobile ? 16 : 18,
-                    ),
-                    tooltip: 'Delete Connection',
-                    padding: EdgeInsets.all(isMobile ? 2 : 4),
-                    constraints: BoxConstraints(
-                      minWidth: isMobile ? 32 : 40,
-                      minHeight: isMobile ? 32 : 40,
-                      maxWidth: isMobile ? 36 : 44,
-                      maxHeight: isMobile ? 36 : 44,
-                    ),
-                    onPressed: () => _deleteConnection(connection['id']),
-                  ),
-                ),
-                isThreeLine: false,
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildNodeMarker(dynamic node, int index, double scaleX, double scaleY) {
-    final double x = (node['x_position'] as num).toDouble();
-    final double y = (node['y_position'] as num).toDouble();
-    final String nodeId = node['id'];
-    
-    final double displayX = x * scaleX;
-    final double displayY = y * scaleY;
-    
-    return Positioned(
-      left: displayX - 15,
-      top: displayY - 15,
-      child: GestureDetector(
-        onTap: () => _onNodeTapped(nodeId, node['name'] ?? 'Node $index'),
-        child: Tooltip(
-          message: node['name'] ?? 'Node $index',
-          child: Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.blue,
-              border: Border.all(
-                color: Colors.white,
-                width: 2,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 4,
                   offset: const Offset(0, 2),
                 ),
@@ -1373,13 +928,13 @@ class MapWithConnectionsPainter extends CustomPainter {
         
         if (isSelected) {
           connectionPaint = Paint()
-            ..color = Colors.red.withOpacity(0.8)
+            ..color = Colors.red.withValues(alpha:0.8)
             ..strokeWidth = 4.0
             ..style = PaintingStyle.stroke;
         } else {
           // All connections are recorded paths - use green
           connectionPaint = Paint()
-            ..color = Colors.green.withOpacity(0.7)
+            ..color = Colors.green.withValues(alpha: 0.7)
             ..strokeWidth = 3.5
             ..style = PaintingStyle.stroke;
         }
