@@ -12,11 +12,13 @@ import '../../widgets/node_capture_widgets.dart';
 class NodeCapture extends StatefulWidget {
   final String mapId;
   final String? nodeId; 
+  final bool startInVideoMode;
 
   const NodeCapture({
     Key? key, 
     required this.mapId,
-    this.nodeId, 
+    this.nodeId,
+    this.startInVideoMode = false,
   }) : super(key: key);
 
   @override
@@ -62,6 +64,9 @@ class _NodeCaptureState extends State<NodeCapture> {
     
     // Check if we're in edit mode
     _isEditMode = widget.nodeId != null;
+    
+    // Set initial step based on startInVideoMode parameter
+    _currentStep = widget.startInVideoMode ? 3 : 1;
     
     // Services
     _supabaseService = SupabaseService();
@@ -401,6 +406,7 @@ class _NodeCaptureState extends State<NodeCapture> {
         // Change title based on mode and step
         title: Text(_isEditMode ? 'Edit Location Node' : 'Add Location Node'),
         backgroundColor: Theme.of(context).primaryColor,
+        foregroundColor: Colors.white,
         leading: _currentStep > 1 
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
