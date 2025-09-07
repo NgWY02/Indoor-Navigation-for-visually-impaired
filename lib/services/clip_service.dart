@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/path_models.dart';
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.106:8000'; 
+  static const String _defaultServerUrl = 'http://192.168.0.105:8000'; 
   final String serverUrl;
   
   ClipService({this.serverUrl = _defaultServerUrl});
