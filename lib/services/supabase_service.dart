@@ -1657,8 +1657,8 @@ class SupabaseService {
         print('  Found ${(waypointsResponse as List).length} waypoints');
 
         // Debug: Print raw waypoint data to see exact structure
-        if ((waypointsResponse as List).isNotEmpty) {
-          final firstWaypoint = (waypointsResponse as List)[0];
+        if ((waypointsResponse).isNotEmpty) {
+          final firstWaypoint = (waypointsResponse)[0];
           print('  DEBUG - First waypoint raw data:');
           print(
               '    ID: ${firstWaypoint['id']} (type: ${firstWaypoint['id'].runtimeType})');
@@ -1670,7 +1670,7 @@ class SupabaseService {
 
         // Convert waypoints data to PathWaypoint objects
         final waypoints =
-            (waypointsResponse as List<dynamic>).map((waypointData) {
+            (waypointsResponse).map((waypointData) {
           // Handle embedding data - could be String, List, or null
           List<double> embedding = [];
           final embeddingData = waypointData['embedding'];

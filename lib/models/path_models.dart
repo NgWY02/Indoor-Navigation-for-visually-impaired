@@ -9,7 +9,6 @@ enum TurnType {
   straight,
   left,
   right,
-  uTurn,
 }
 
 // Enum for landmark types

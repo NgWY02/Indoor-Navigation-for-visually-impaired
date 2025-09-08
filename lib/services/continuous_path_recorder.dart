@@ -322,8 +322,6 @@ class ContinuousPathRecorder {
     
     if (absChange < _significantHeadingChange) {
       return TurnType.straight;
-    } else if (absChange > 165) {
-      return TurnType.uTurn;
     } else if (headingChange > 0) {
       return TurnType.right;
     } else {
@@ -339,8 +337,6 @@ class ContinuousPathRecorder {
         return 'Turn left (${headingChange.abs().round()}°)';
       case TurnType.right:
         return 'Turn right (${headingChange.abs().round()}°)';
-      case TurnType.uTurn:
-        return 'U-turn (${headingChange.abs().round()}°)';
     }
   }
 

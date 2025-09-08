@@ -40,6 +40,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   
   // UI State
   bool _isProcessingFrame = false;
+  bool _isTakingPicture = false;  // New: Only for camera access
   Timer? _frameProcessingTimer;
   
   // Debug overlay
@@ -55,6 +56,11 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   // Localization result display
   String? _localizationResult;
   bool _showLocalizationResult = false;
+  
+  // Recovery system state
+  bool _isInRecoveryMode = false;
+  int _recoveryFrameCount = 0;
+  bool _isCapturingRecoveryFrame = false;
 
   @override
   void initState() {
@@ -102,6 +108,8 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         onInstructionUpdate: _onInstructionUpdate,
         onError: _onError,
         onDebugUpdate: _onDebugUpdate,
+        onRequestManualCapture: _onRequestManualCapture,
+        onManualFrameCaptured: _onManualFrameCaptured,
       );
 
       // Initialize camera
@@ -183,10 +191,6 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     }
   }
 
-  Future<void> _startLocalization() async {
-    // This method is deprecated - use _startLocalizationProcess instead
-    await _startLocalizationProcess();
-  }
 
   Future<void> _startLocalizationProcess() async {
     setState(() {
@@ -256,16 +260,21 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     if (_isProcessingFrame || 
         _cameraController == null || 
         !_cameraController!.value.isInitialized ||
-        _screenState != NavigationScreenState.navigating) {
+        _screenState != NavigationScreenState.navigating ||
+        _isTakingPicture) {  // ✅ Only check camera access, not recovery processing
       return;
     }
 
     _isProcessingFrame = true;
 
     try {
+      // Phase 1: Camera access (needs mutual exclusion)
+      _isTakingPicture = true;
       final image = await _cameraController!.takePicture();
-      final imageFile = File(image.path);
+      _isTakingPicture = false;  // Camera is now free
       
+      // Phase 2: Processing (can happen in parallel)
+      final imageFile = File(image.path);
       await _navigationService.processNavigationFrame(imageFile);
       
       // Clean up temp file
@@ -273,6 +282,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       
     } catch (e) {
       print('Error processing navigation frame: $e');
+      _isTakingPicture = false;  // Ensure camera is freed on error
     } finally {
       _isProcessingFrame = false;
     }
@@ -280,7 +290,34 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
   // Callback methods
   void _onNavigationStateChanged(nav_service.NavigationState state) {
-    // Handle navigation state changes if needed
+    // Handle recovery state changes
+    setState(() {
+      switch (state) {
+        case nav_service.NavigationState.awaitingManualCapture:
+          _isInRecoveryMode = true;
+          _isCapturingRecoveryFrame = false;  // ✅ Reset when entering recovery mode
+          _isTakingPicture = false;
+          break;
+        case nav_service.NavigationState.manualCaptureInProgress:
+          _isInRecoveryMode = true;
+          _isCapturingRecoveryFrame = false;  // ✅ Reset when ready to capture
+          _isTakingPicture = false;
+          break;
+        case nav_service.NavigationState.analyzingCapturedFrames:
+          _isInRecoveryMode = true;
+          break;
+        case nav_service.NavigationState.navigating:
+        case nav_service.NavigationState.idle:
+        case nav_service.NavigationState.destinationReached:
+          _isInRecoveryMode = false;
+          _recoveryFrameCount = 0;
+          _isCapturingRecoveryFrame = false;
+          _isTakingPicture = false;  // Reset camera state
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   void _onStatusUpdate(String message) {
@@ -313,6 +350,56 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     setState(() {
       _debugInfo = debugInfo;
     });
+  }
+
+  void _onRequestManualCapture() {
+    setState(() {
+      _isInRecoveryMode = true;
+      _recoveryFrameCount = 0;
+      _isCapturingRecoveryFrame = false;  // ✅ Reset capture state when recovery starts/restarts
+      _isTakingPicture = false;  // ✅ Reset camera state
+    });
+  }
+
+  void _onManualFrameCaptured(File imageFile) {
+    setState(() {
+      _recoveryFrameCount++;
+    });
+  }
+
+  Future<void> _captureRecoveryFrame() async {
+    if (!_isInRecoveryMode || 
+        _cameraController == null || 
+        !_cameraController!.value.isInitialized ||
+        _isCapturingRecoveryFrame ||
+        _isTakingPicture) {  // ✅ Only check camera access, not frame processing
+      return;
+    }
+
+    setState(() {
+      _isCapturingRecoveryFrame = true;
+    });
+    
+    try {
+      // Phase 1: Camera access (needs mutual exclusion)
+      _isTakingPicture = true;
+      final image = await _cameraController!.takePicture();
+      _isTakingPicture = false;  // Camera is now free
+      
+      // Phase 2: Processing (can happen in parallel)
+      final imageFile = File(image.path);
+      await _navigationService.processManualCapturedFrame(imageFile);
+      
+    } catch (e) {
+      _onError('Failed to capture recovery frame: $e');
+      _isTakingPicture = false;  // Ensure camera is freed on error
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isCapturingRecoveryFrame = false;
+        });
+      }
+    }
   }
 
   @override
@@ -440,6 +527,57 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Recovery mode overlay (if active)
+          if (_isInRecoveryMode)
+            Container(
+              margin: EdgeInsets.only(bottom: 16),
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                children: [
+                  Text(
+                    'Recovery Mode Active',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Frame ${_recoveryFrameCount} of 3',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                  if (_navigationService.state == nav_service.NavigationState.manualCaptureInProgress) ...[
+                    SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: (_isCapturingRecoveryFrame || _isTakingPicture) 
+                          ? null 
+                          : _captureRecoveryFrame,
+                      icon: (_isCapturingRecoveryFrame || _isTakingPicture)
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Icon(Icons.camera_alt),
+                      label: Text((_isCapturingRecoveryFrame || _isTakingPicture) ? 'Capturing...' : 'Capture Frame'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.deepOrange,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+
           // Screen content
           Container(
             constraints: BoxConstraints(
