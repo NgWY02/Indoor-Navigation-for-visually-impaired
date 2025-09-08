@@ -60,7 +60,7 @@ class RealTimeNavigationService {
   
   // Waypoint recovery system
   int _consecutiveWaypointFailures = 0;
-  static const int _waypointFailureThreshold = 5;
+  static const int _waypointFailureThreshold = 10;
   static const double _recoveryThreshold = 0.76;
   int _manualCaptureCount = 0;
   List<File> _capturedRecoveryFrames = [];
@@ -661,7 +661,7 @@ class RealTimeNavigationService {
       // Destination reached - no more waypoints
       await _destinationReached();
     } else {
-      // Continue to next waypoint  
+      // Continue to next waypoint
       _setState(NavigationState.navigating);
       // Only provide audio guidance after successful waypoint progression
       await _updateNavigationInstruction();
@@ -885,7 +885,7 @@ class RealTimeNavigationService {
         _consecutiveWaypointFailures = 0;
         _recoveryAttempts = 0;
         
-        _setState(NavigationState.navigating);
+          _setState(NavigationState.navigating);
         await _updateNavigationInstruction();
         
         // Clean up captured frames
@@ -937,7 +937,7 @@ class RealTimeNavigationService {
       if (bestWaypointForFrame != null) {
         waypointVotes[bestWaypointForFrame] = (waypointVotes[bestWaypointForFrame] ?? 0) + 1;
         print('  Frame ${frameIndex + 1}: Votes for waypoint $bestWaypointForFrame (similarity: ${bestSimilarityForFrame.toStringAsFixed(3)})');
-      } else {
+    } else {
         print('  Frame ${frameIndex + 1}: No waypoint above threshold');
       }
     }

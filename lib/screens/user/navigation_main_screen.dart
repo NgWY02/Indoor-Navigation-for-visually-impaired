@@ -7,7 +7,8 @@ import '../../services/clip_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/position_localization_service.dart';
 import '../../services/real_time_navigation_service.dart' as nav_service;
-import '../../widgets/debug_overlay.dart'; 
+import '../../widgets/debug_overlay.dart';
+import '../../widgets/compass_painter.dart'; 
 
 class NavigationMainScreen extends StatefulWidget {
   final CameraDescription camera;
@@ -61,6 +62,11 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   bool _isInRecoveryMode = false;
   int _recoveryFrameCount = 0;
   bool _isCapturingRecoveryFrame = false;
+
+  // Compass orientation state
+  double? _currentHeading;
+  double? _targetHeading;
+  bool _isInOrientationMode = false;
 
   @override
   void initState() {
@@ -290,26 +296,36 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
   // Callback methods
   void _onNavigationStateChanged(nav_service.NavigationState state) {
-    // Handle recovery state changes
+    // Handle recovery state changes and orientation mode
     setState(() {
       switch (state) {
+        case nav_service.NavigationState.initialOrientation:
+          _isInOrientationMode = true;
+          _isInRecoveryMode = false;
+          // Get target heading from navigation service
+          _updateCompassData();
+          break;
         case nav_service.NavigationState.awaitingManualCapture:
           _isInRecoveryMode = true;
+          _isInOrientationMode = false;
           _isCapturingRecoveryFrame = false;  // ✅ Reset when entering recovery mode
           _isTakingPicture = false;
           break;
         case nav_service.NavigationState.manualCaptureInProgress:
           _isInRecoveryMode = true;
+          _isInOrientationMode = false;
           _isCapturingRecoveryFrame = false;  // ✅ Reset when ready to capture
           _isTakingPicture = false;
           break;
         case nav_service.NavigationState.analyzingCapturedFrames:
           _isInRecoveryMode = true;
+          _isInOrientationMode = false;
           break;
         case nav_service.NavigationState.navigating:
         case nav_service.NavigationState.idle:
         case nav_service.NavigationState.destinationReached:
           _isInRecoveryMode = false;
+          _isInOrientationMode = false;
           _recoveryFrameCount = 0;
           _isCapturingRecoveryFrame = false;
           _isTakingPicture = false;  // Reset camera state
@@ -365,6 +381,45 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     setState(() {
       _recoveryFrameCount++;
     });
+  }
+
+  void _updateCompassData() {
+    // Get current and target headings from navigation service
+    final currentRoute = _navigationService.currentRoute;
+    if (currentRoute != null && currentRoute.waypoints.isNotEmpty) {
+      // Get first waypoint heading as target
+      final firstWaypoint = currentRoute.waypoints.firstWhere(
+        (waypoint) => waypoint.sequenceNumber == 0,
+        orElse: () => currentRoute.waypoints.first,
+      );
+      _targetHeading = firstWaypoint.heading;
+    }
+    
+    // Get current compass heading
+    _currentHeading = _navigationService.currentHeading;
+    
+    // Start periodic compass updates during orientation
+    if (_isInOrientationMode) {
+      Timer.periodic(Duration(milliseconds: 500), (timer) {
+        if (!_isInOrientationMode) {
+          timer.cancel();
+          return;
+        }
+        setState(() {
+          _currentHeading = _navigationService.currentHeading;
+        });
+      });
+    }
+  }
+
+  bool _isWithinOrientationRange() {
+    if (_currentHeading == null || _targetHeading == null) return false;
+    
+    // Calculate shortest angular difference
+    double diff = (_targetHeading! - _currentHeading!).abs();
+    if (diff > 180) diff = 360 - diff;
+    
+    return diff <= 5.0; // Within 5 degrees
   }
 
   Future<void> _captureRecoveryFrame() async {
@@ -459,8 +514,25 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         children: [
           CameraPreview(_cameraController!),
 
-          // Debug overlay - only show during navigation
-          if (_screenState == NavigationScreenState.navigating)
+          // Compass overlay during orientation phase (no debug mode)
+          if (_isInOrientationMode && _currentHeading != null && _targetHeading != null)
+            Positioned(
+              top: 60,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: CompassWidget(
+                  currentHeading: _currentHeading!,
+                  targetHeading: _targetHeading!,
+                  threshold: 5.0,
+                  isWithinRange: _isWithinOrientationRange(),
+                  size: 220.0, // Reduced size to fit better
+                ),
+              ),
+            ),
+
+          // Debug overlay - only show during navigation (NOT orientation)
+          if (_screenState == NavigationScreenState.navigating && !_isInOrientationMode)
             DebugOverlay(
               debugInfo: _debugInfo,
               isVisible: true,  // Always show during navigation
@@ -527,113 +599,122 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Recovery mode overlay (if active)
-          if (_isInRecoveryMode)
-            Container(
-              margin: EdgeInsets.only(bottom: 16),
-              padding: EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.orange.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                children: [
-                  Text(
-                    'Recovery Mode Active',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Frame ${_recoveryFrameCount} of 3',
-                    style: TextStyle(color: Colors.white),
-                  ),
-                  if (_navigationService.state == nav_service.NavigationState.manualCaptureInProgress) ...[
-                    SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      onPressed: (_isCapturingRecoveryFrame || _isTakingPicture) 
-                          ? null 
-                          : _captureRecoveryFrame,
-                      icon: (_isCapturingRecoveryFrame || _isTakingPicture)
-                        ? SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : Icon(Icons.camera_alt),
-                      label: Text((_isCapturingRecoveryFrame || _isTakingPicture) ? 'Capturing...' : 'Capture Frame'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.deepOrange,
-                        foregroundColor: Colors.white,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
 
           // Screen content
           Container(
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.3,
+              maxHeight: _isInOrientationMode 
+                  ? MediaQuery.of(context).size.height * 0.2  // Reduced height for orientation mode
+                  : MediaQuery.of(context).size.height * 0.3,
             ),
-            child: _buildScreenContent(),
+            child: _isInOrientationMode ? _buildOrientationContent() : _buildScreenContent(),
           ),
 
           SizedBox(height: 12),
 
-          // Navigation instruction (only show during navigation)
-          if (_screenState == NavigationScreenState.navigating && _currentInstruction != null)
-            Container(
-              margin: EdgeInsets.only(bottom: 12),
-              padding: EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[900]!.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _currentInstruction!.displayText,
-                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Text(
-                        'Waypoint ${_currentInstruction!.waypointNumber} of ${_currentInstruction!.totalWaypoints}',
-                        style: TextStyle(color: Colors.white70, fontSize: 14),
-                      ),
-                      Spacer(),
-                      Text(
-                        '${_navigationService.progressPercentage.round()}%',
-                        style: TextStyle(color: Colors.white70, fontSize: 14),
+          // Navigation instruction OR Recovery mode (only show one, not both)
+          if (_screenState == NavigationScreenState.navigating && !_isInOrientationMode) ...[
+            if (_isInRecoveryMode)
+              // Recovery mode replaces navigation instruction
+              Container(
+                margin: EdgeInsets.only(bottom: 12),
+                padding: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.refresh, color: Colors.white, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Recovery Mode Active',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Frame ${_recoveryFrameCount} of 3',
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                    if (_navigationService.state == nav_service.NavigationState.manualCaptureInProgress) ...[
+                      SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        onPressed: (_isCapturingRecoveryFrame || _isTakingPicture) 
+                            ? null 
+                            : _captureRecoveryFrame,
+                        icon: (_isCapturingRecoveryFrame || _isTakingPicture)
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.black,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Icon(Icons.camera_alt, color: Colors.black),
+                        label: Text(
+                          (_isCapturingRecoveryFrame || _isTakingPicture) ? 'Capturing...' : 'Capture Frame',
+                          style: TextStyle(color: Colors.black),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: Colors.black,
+                        ),
                       ),
                     ],
-                  ),
-                  SizedBox(height: 8),
-                  LinearProgressIndicator(
-                    value: _navigationService.progressPercentage / 100,
-                    backgroundColor: Colors.grey[600],
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                  ),
-                ],
+                  ],
+                ),
+              )
+            else if (_currentInstruction != null)
+              // Regular navigation instruction
+              Container(
+                margin: EdgeInsets.only(bottom: 12),
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _currentInstruction!.displayText,
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          'Waypoint ${_currentInstruction!.waypointNumber} of ${_currentInstruction!.totalWaypoints}',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                        Spacer(),
+                        Text(
+                          '${_navigationService.progressPercentage.round()}%',
+                          style: TextStyle(color: Colors.white70, fontSize: 14),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: 8),
+                    LinearProgressIndicator(
+                      value: _navigationService.progressPercentage / 100,
+                      backgroundColor: Colors.grey[600],
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  ],
+                ),
               ),
-            ),
+          ],
 
           // Action buttons
           _buildActionButtons(),
@@ -659,6 +740,79 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       case NavigationScreenState.navigating:
         return _buildNavigationContent();
     }
+  }
+
+  Widget _buildOrientationContent() {
+    if (!_isInOrientationMode || _currentHeading == null || _targetHeading == null) {
+      return Container(
+        padding: EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.6),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+            SizedBox(height: 8),
+            Text(
+              'Waiting for Compass...',
+              style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      padding: EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            _isWithinOrientationRange() 
+                ? '✅ Direction Perfect!' 
+                : '🧭 Turn Slowly to Target',
+            style: TextStyle(
+              color: _isWithinOrientationRange() ? Colors.green : Colors.white, 
+              fontSize: 16, 
+              fontWeight: FontWeight.bold
+            ),
+            textAlign: TextAlign.center,
+          ),
+          SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              Column(
+                children: [
+                  Text('Current', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  Text(
+                    '${_currentHeading!.toStringAsFixed(0)}°', 
+                    style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)
+                  ),
+                ],
+              ),
+              Text('→', style: TextStyle(color: Colors.white70, fontSize: 18)),
+              Column(
+                children: [
+                  Text('Target', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                  Text(
+                    '${_targetHeading!.toStringAsFixed(0)}°', 
+                    style: TextStyle(color: Colors.blue, fontSize: 14, fontWeight: FontWeight.bold)
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildInitializingContent() {
