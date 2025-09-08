@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
-import 'navigation_main_screen.dart';
+import 'user_navigation_main_screen.dart';
 import '../common/profile_screen.dart';
 
 class UserHomeScreen extends StatelessWidget {
@@ -116,7 +116,7 @@ class UserHomeScreen extends StatelessWidget {
                           
                           Navigator.of(context).push(
                             MaterialPageRoute(
-                              builder: (context) => NavigationMainScreen(
+                              builder: (context) => UserNavigationMainScreen(
                                 camera: cameras.first,
                               ),
                             ),
