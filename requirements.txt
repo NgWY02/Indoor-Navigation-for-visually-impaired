@@ -1,0 +1,37 @@
+# FastAPI Server Dependencies for Indoor Navigation System
+# Updated to match current conda environment versions
+# NOTE: AI/ML libraries (torch, transformers, etc.) need to be installed separately
+
+# Core Web Framework
+fastapi==0.116.1
+uvicorn==0.23.1
+python-multipart==0.0.6
+
+# Data Validation
+pydantic==2.11.7
+pydantic_core==2.33.2
+
+# Image Processing and Computer Vision
+Pillow==11.1.0
+numpy==2.0.1
+opencv-python==4.12.0.88
+
+# AI/ML Frameworks
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+transformers==4.56.0  # For DINOv2 vision model
+
+# Object Detection
+ultralytics==8.3.191
+
+# Computer Vision Models (Optional - Advanced Features)
+segment_anything @ git+https://github.com/facebookresearch/segment-anything.git
+diffusers==0.35.1
+
+# HTTP and Networking
+requests==2.32.5
+
+# Development and Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1

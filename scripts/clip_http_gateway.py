@@ -941,10 +941,11 @@ async def encode_image(image: UploadFile = File(...)):
 
 
 @app.post("/encode/inpainted", response_model=EmbeddingResponse)
-async def encode_image_inpainted(image: UploadFile = File(...)):
+async def encode_image_inpainted(image: UploadFile = File(...), disable_yolo: bool = False):
     """Inpaint likely people using SAM+Stable Diffusion before encoding with best available model.
 
     Falls back to original image if inpainting is unavailable or fails.
+    Set disable_yolo=True to skip YOLO detection and inpainting completely.
     """
     global dinov2_model, clip_vitl14_model, clip_client
 
@@ -956,8 +957,11 @@ async def encode_image_inpainted(image: UploadFile = File(...)):
         # Read the image data
         image_data = await image.read()
 
-        # Try inpainting pipeline
-        pil_image = inpaint_people_from_image_bytes(image_data) or Image.open(io.BytesIO(image_data)).convert("RGB")
+        # Try inpainting pipeline or use original image if YOLO is disabled
+        if disable_yolo:
+            pil_image = Image.open(io.BytesIO(image_data)).convert("RGB")
+        else:
+            pil_image = inpaint_people_from_image_bytes(image_data) or Image.open(io.BytesIO(image_data)).convert("RGB")
 
         # Use DINOv2 if available (best)
         if dinov2_model is not None:
@@ -1027,14 +1031,23 @@ async def encode_image_navigation(image: UploadFile = File(...)):
 
 
 @app.post("/detect/people", response_model=PeopleDetectionResponse)
-async def detect_people(image: UploadFile = File(...)):
+async def detect_people(image: UploadFile = File(...), disable_yolo: bool = False):
     """Detect people in an image using YOLO without full preprocessing.
     
     Returns information about detected people including count and confidence scores.
+    Set disable_yolo=True to skip YOLO detection and return no people detected.
     """
     try:
         image_bytes = await image.read()
         img = _np_image_from_bytes(image_bytes)
+        
+        # Skip YOLO detection if disabled
+        if disable_yolo:
+            return PeopleDetectionResponse(
+                people_detected=False,
+                people_count=0,
+                confidence_scores=[]
+            )
         
         # Use YOLO to detect people + carried objects
         all_masks = _get_yolo_person_masks(img)
