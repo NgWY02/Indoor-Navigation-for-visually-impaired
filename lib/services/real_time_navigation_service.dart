@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:pedometer/pedometer.dart';
 import '../services/clip_service.dart';
 import '../services/position_localization_service.dart';
 import '../services/supabase_service.dart';
@@ -35,32 +34,31 @@ class RealTimeNavigationService {
   Timer? _navigationTimer;
   StreamSubscription<CompassEvent>? _compassSubscription;
   
-  // STEP COUNTER SOLUTION: Movement validation with REAL distances
-  StreamSubscription<StepCount>? _stepCountSubscription;
-  StreamSubscription<PedestrianStatus>? _pedestrianStatusSubscription;
-  // Note: Now uses real step-based distances from path recording
   
   // Tracking
   double? _currentHeading;
   List<double>? _lastCapturedEmbedding;
   DateTime _lastGuidanceTime = DateTime.now();
   
+  // YOLO toggle state
+  bool _disableYolo = false;
+  
   // Configuration - ALL threshold constants are centralized HERE
   // To change any threshold value, modify these constants only
-  static const double _waypointReachedThresholdDefault = 0.85;  // Main navigation threshold
-  static const double _cleanSceneThreshold = 0.85;  // For clean-to-clean comparisons
+  static const double _waypointReachedThresholdDefault = 0.9;  // Main navigation threshold
+  static const double _cleanSceneThreshold = 0.9;  // For clean-to-clean comparisons
   static const double _peoplePresentThreshold = 0.75;  // For scenes with people
   static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
-  static const double _turnWaypointThreshold = 0.92;  // Higher threshold for turn waypoints (left/right/U-turn)
+  static const double _turnWaypointThreshold = 0.935;  // Higher threshold for turn waypoints (left/right/U-turn)
   static const Duration _guidanceInterval = Duration(seconds: 1);
   static const Duration _repositioningTimeout = Duration(seconds: 10);  // Dynamic threshold and audio management
-  double _currentWaypointThreshold = 0.88;
+  double _currentWaypointThreshold = 0.9;
   String? _lastSpokenInstruction;
   DateTime? _lastInstructionTime;
   
   // Waypoint recovery system
   int _consecutiveWaypointFailures = 0;
-  static const int _waypointFailureThreshold = 10;
+  static const int _waypointFailureThreshold = 30;
   static const double _recoveryThreshold = 0.76;
   int _manualCaptureCount = 0;
   List<File> _capturedRecoveryFrames = [];
@@ -87,8 +85,6 @@ class RealTimeNavigationService {
     this.onManualFrameCaptured,
   }) : _clipService = clipService, _tts = FlutterTts() {
     _initializeTTS();
-    // TEMPORARILY DISABLED: Step counter for testing
-    // _initializeStepCounter();
   }
 
   // Public getters
@@ -101,6 +97,12 @@ class RealTimeNavigationService {
   
   /// Get the current compass heading (null if not available)
   double? get currentHeading => _currentHeading;
+  
+  /// Set whether YOLO detection should be disabled
+  void setDisableYolo(bool disable) {
+    _disableYolo = disable;
+    print('🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}');
+  }
   
   /// Get the target heading for initial orientation (null if not in orientation phase)
   double? get targetHeading {
@@ -176,8 +178,6 @@ class RealTimeNavigationService {
   Future<void> stopNavigation({bool silent = false}) async {
     _navigationTimer?.cancel();
     _compassSubscription?.cancel();
-    _stepCountSubscription?.cancel();
-    _pedestrianStatusSubscription?.cancel();
     
     if (_currentRoute != null && !silent) {
       await _speak('Navigation stopped.');
@@ -439,21 +439,28 @@ class RealTimeNavigationService {
         cleanSceneThreshold: _cleanSceneThreshold,
         peoplePresentThreshold: _peoplePresentThreshold,
         crowdedSceneThreshold: _crowdedSceneThreshold,
+        disableYolo: _disableYolo,
       );
       _lastCapturedEmbedding = navigationResult.embedding;
       
       // HALLWAY FIX: Use higher threshold for waypoints BEFORE turns to prevent premature turn instructions
+      // Also use higher threshold for final waypoint to ensure accurate destination reaching
       final nextWaypoint = _getWaypointBySequence(_currentSequenceNumber + 1);
       final isBeforeTurnWaypoint = nextWaypoint != null &&
                                  (nextWaypoint.turnType == TurnType.left ||
                                   nextWaypoint.turnType == TurnType.right);
+      final isFinalWaypoint = nextWaypoint == null; // No next waypoint means this is the final one
 
-      _currentWaypointThreshold = isBeforeTurnWaypoint ? _turnWaypointThreshold : navigationResult.recommendedThreshold;
+      _currentWaypointThreshold = (isBeforeTurnWaypoint || isFinalWaypoint) ? _turnWaypointThreshold : navigationResult.recommendedThreshold;
       
       print('🎯 Navigation frame: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
-      print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} (${isBeforeTurnWaypoint ? 'BEFORE TURN (0.92)' : 'NORMAL (' + navigationResult.recommendedThreshold.toStringAsFixed(2) + ')'})');
+      String thresholdReason = isFinalWaypoint ? 'FINAL WAYPOINT (0.935)' :
+                              isBeforeTurnWaypoint ? 'BEFORE TURN (0.935)' :
+                              'NORMAL (' + navigationResult.recommendedThreshold.toStringAsFixed(2) + ')';
+      print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} ($thresholdReason)');
+      print('🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}');
       print('👥 People detected: ${navigationResult.peopleDetected ? 'YES (${navigationResult.peopleCount})' : 'NO'}');
-      print('🎨 Inpainting: ${navigationResult.peopleDetected ? 'Applied (people + carried objects removed)' : 'Skipped (no people detected)'}');
+      print('🎨 Inpainting: ${_disableYolo ? 'DISABLED BY USER' : navigationResult.peopleDetected ? 'Applied (people + carried objects removed)' : 'Skipped (no people detected)'}');
       
       // Calculate similarity with target waypoint
       final similarity = _calculateCosineSimilarity(navigationResult.embedding, targetWaypoint.embedding);
@@ -461,9 +468,7 @@ class RealTimeNavigationService {
       
       // STEP COUNTER SOLUTION: Multi-condition waypoint validation
       final hasVisualMatch = similarity >= _currentWaypointThreshold;
-      // TEMPORARILY DISABLED: Step validation for testing
-      // final hasSufficientSteps = _hasWalkedSufficientSteps(targetWaypoint);
-      final hasSufficientSteps = true; // Always true for testing
+      final hasSufficientSteps = true; // Visual-only navigation mode
       
       print('🔍 Waypoint validation for sequence $_currentSequenceNumber:');
       print('   👁️ Visual match (≥${_currentWaypointThreshold.toStringAsFixed(2)}): $hasVisualMatch (${similarity.toStringAsFixed(3)})');
@@ -476,11 +481,12 @@ class RealTimeNavigationService {
           🔍 WAYPOINT MATCHING:
           ━━━━━━━━━━━━━━━━━━━━
           📍 Target: ${targetWaypoint.landmarkDescription ?? 'No landmark'} (Seq ${_currentSequenceNumber})
-          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.92 threshold)" : ""}
+          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isFinalWaypoint ? "FINAL WAYPOINT (0.935 threshold)" : isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.935 threshold)" : ""}
+          🎯 YOLO: ${_disableYolo ? 'DISABLED' : 'ENABLED'}
           When Recorded: ${targetWaypoint.peopleDetected ? "YES (${targetWaypoint.peopleCount} people)" : "NO people"}
-          Now Detecting: ${navigationResult.peopleDetected ? "YES (${navigationResult.peopleCount} people)" : "NO people"} (YOLO active)
-          � Inpainting: ${navigationResult.peopleDetected ? "Applied (people removed)" : "Not needed"}
-          �🎯 Threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} (dynamic based on people detection)
+          Now Detecting: ${navigationResult.peopleDetected ? "YES (${navigationResult.peopleCount} people)" : "NO people"} ${_disableYolo ? "(YOLO disabled)" : "(YOLO active)"}
+          🎨 Inpainting: ${_disableYolo ? "DISABLED BY USER" : navigationResult.peopleDetected ? "Applied (people removed)" : "Not needed"}
+          🎯 Threshold: ${_currentWaypointThreshold.toStringAsFixed(3)} (dynamic based on people detection)
           👁️ Similarity: ${similarity.toStringAsFixed(3)}
           ${hasVisualMatch ? "✅ MATCH!" : "❌ Too low"} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})
           🔍 Embedding: ${_lastCapturedEmbedding?.length ?? 0} dims
@@ -621,10 +627,6 @@ class RealTimeNavigationService {
         .reduce((a, b) => a > b ? a : b);
   }
 
-  // � REMOVED: _hasWalkedSufficientSteps() - using visual-only navigation mode
-
-
-
   Future<void> _waypointReached() async {
     _setState(NavigationState.approachingWaypoint);
     
@@ -646,9 +648,6 @@ class RealTimeNavigationService {
     _lastSpokenInstruction = null;
     _lastInstructionTime = null;
     
-    // DISABLED: Step counter reset
-    // _stepsAtLastWaypoint = _currentTotalSteps;
-    // print('🔄 Step counter reset: Steps at waypoint = $_stepsAtLastWaypoint');
     print('🔄 Waypoint progression (visual-only mode)');
     
     // Move to NEXT SEQUENCE NUMBER, not array index!
@@ -859,6 +858,7 @@ class RealTimeNavigationService {
           cleanSceneThreshold: _cleanSceneThreshold,
           peoplePresentThreshold: _peoplePresentThreshold,
           crowdedSceneThreshold: _crowdedSceneThreshold,
+          disableYolo: _disableYolo,
         );
         
         frameEmbeddings.add(navigationResult.embedding);

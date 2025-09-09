@@ -67,6 +67,9 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   double? _currentHeading;
   double? _targetHeading;
   bool _isInOrientationMode = false;
+  
+  // YOLO Detection toggle
+  bool _disableYolo = false;
 
   @override
   void initState() {
@@ -599,6 +602,11 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // YOLO Detection Toggle (only show during navigation)
+          if (_screenState == NavigationScreenState.navigating || 
+              _screenState == NavigationScreenState.readyToLocalize ||
+              _screenState == NavigationScreenState.selectingRoute)
+            _buildYoloToggle(),
 
           // Screen content
           Container(
@@ -1086,6 +1094,63 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
   Widget _buildNavigationContent() {
     return Container(); // Navigation controls moved to action buttons
+  }
+
+  Widget _buildYoloToggle() {
+    return Container(
+      margin: EdgeInsets.only(bottom: 8),
+      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            _disableYolo ? Icons.person_off : Icons.person,
+            color: _disableYolo ? Colors.red : Colors.green,
+            size: 20,
+          ),
+          SizedBox(width: 8),
+          Text(
+            'YOLO Detection',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          SizedBox(width: 8),
+          Switch(
+            value: !_disableYolo, // Toggle is "enable" so invert the disable flag
+            onChanged: (bool value) {
+              setState(() {
+                _disableYolo = !value;
+              });
+              // Update the navigation service
+              _navigationService.setDisableYolo(_disableYolo);
+              // Provide feedback to user
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    _disableYolo 
+                      ? 'YOLO Disabled - Using raw images for navigation'
+                      : 'YOLO Enabled - People will be detected and inpainted',
+                  ),
+                  duration: Duration(seconds: 2),
+                  backgroundColor: _disableYolo ? Colors.orange : Colors.green,
+                ),
+              );
+            },
+            activeColor: Colors.green,
+            inactiveThumbColor: Colors.red,
+            inactiveTrackColor: Colors.red.withOpacity(0.3),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildActionButtons() {

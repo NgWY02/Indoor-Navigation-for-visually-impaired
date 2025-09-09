@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../models/path_models.dart';
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.104:8000'; 
+  static const String _defaultServerUrl = 'http://192.168.0.105:8000'; 
   final String serverUrl;
   
   ClipService({this.serverUrl = _defaultServerUrl});
@@ -41,8 +41,8 @@ class ClipService {
   }
 
   /// Generate embeddings for navigation with inpainting (for real-time navigation accuracy)
-  Future<List<double>> generateNavigationEmbeddingInpainted(File imageFile) async {
-    return _generateEmbedding(imageFile, '/encode/inpainted');
+  Future<List<double>> generateNavigationEmbeddingInpainted(File imageFile, {bool disableYolo = false}) async {
+    return _generateEmbedding(imageFile, '/encode/inpainted', disableYolo: disableYolo);
   }
 
   /// Combined navigation method with inpainting: detect people + generate inpainted embedding + calculate threshold
@@ -51,12 +51,27 @@ class ClipService {
     required double cleanSceneThreshold,
     required double peoplePresentThreshold,
     required double crowdedSceneThreshold,
+    bool disableYolo = false,
   }) async {
     try {
-      // Run people detection and inpainted embedding generation in parallel for speed
+      if (disableYolo) {
+        // When YOLO is disabled, use regular navigation embedding (no inpainting needed)
+        debugPrint('ClipService: YOLO disabled - using regular navigation embedding');
+        final embedding = await generateNavigationEmbedding(imageFile);
+        
+        return NavigationEmbeddingResult(
+          embedding: embedding,
+          peopleDetected: false,
+          peopleCount: 0,
+          confidenceScores: [],
+          recommendedThreshold: cleanSceneThreshold, // Use clean scene threshold when YOLO disabled
+        );
+      }
+      
+      // When YOLO is enabled, run people detection and inpainted embedding generation in parallel
       final futures = await Future.wait([
-        detectPeople(imageFile),
-        generateNavigationEmbeddingInpainted(imageFile),
+        detectPeople(imageFile, disableYolo: false),
+        generateNavigationEmbeddingInpainted(imageFile, disableYolo: false),
       ]);
       
       final peopleResult = futures[0] as PeopleDetectionResult;
@@ -210,9 +225,18 @@ class ClipService {
   }
 
   /// Detect people in an image without full preprocessing
-  Future<PeopleDetectionResult> detectPeople(File imageFile) async {
+  Future<PeopleDetectionResult> detectPeople(File imageFile, {bool disableYolo = false}) async {
     try {
-      debugPrint('ClipService: Detecting people in ${imageFile.path}');
+      debugPrint('ClipService: Detecting people in ${imageFile.path} (YOLO ${disableYolo ? 'DISABLED' : 'ENABLED'})');
+      
+      // Return no people if YOLO is disabled
+      if (disableYolo) {
+        return PeopleDetectionResult(
+          peopleDetected: false,
+          peopleCount: 0,
+          confidenceScores: [],
+        );
+      }
       
       // Check if server is available
       if (!await isServerAvailable()) {
@@ -222,8 +246,11 @@ class ClipService {
       // Read original image bytes
       final originalBytes = await imageFile.readAsBytes();
       
-      // Prepare request
-      final request = http.MultipartRequest('POST', Uri.parse('$serverUrl/detect/people'));
+      // Prepare request with optional disableYolo parameter  
+      final uri = Uri.parse('$serverUrl/detect/people').replace(
+        queryParameters: disableYolo ? {'disable_yolo': 'true'} : {},
+      );
+      final request = http.MultipartRequest('POST', uri);
       request.files.add(http.MultipartFile.fromBytes('image', originalBytes, filename: 'image.jpg'));
       
       // Send request
@@ -258,7 +285,7 @@ class ClipService {
   }
 
   /// Internal method for embedding generation with different endpoints
-  Future<List<double>> _generateEmbedding(File imageFile, String endpoint) async {
+  Future<List<double>> _generateEmbedding(File imageFile, String endpoint, {bool disableYolo = false}) async {
     try {
       debugPrint('ClipService: Generating embedding for ${imageFile.path} via $endpoint');
       
@@ -270,8 +297,11 @@ class ClipService {
       // Read original image bytes (server will handle resize + preprocessing)
       final originalBytes = await imageFile.readAsBytes();
       
-      // Prepare request
-      final request = http.MultipartRequest('POST', Uri.parse('$serverUrl$endpoint'));
+      // Prepare request with optional disableYolo parameter
+      final uri = Uri.parse('$serverUrl$endpoint').replace(
+        queryParameters: disableYolo ? {'disable_yolo': 'true'} : {},
+      );
+      final request = http.MultipartRequest('POST', uri);
       request.files.add(http.MultipartFile.fromBytes('image', originalBytes, filename: 'image.jpg'));
       
       // Send request

@@ -9,7 +9,6 @@ import 'package:app_links/app_links.dart';
 import 'screens/admin/admin_home_screen.dart';
 import 'screens/common/profile_screen.dart';
 import 'services/supabase_service.dart';
-import 'screens/admin/admin_panel.dart';
 import 'screens/admin/image_test_screen.dart';
 import 'auth/auth_wrapper.dart';
 import 'auth/new_password_screen.dart';
@@ -245,7 +244,6 @@ class _MyAppState extends State<MyApp> {
       // Use AuthWrapper for proper authentication flow
       home: AuthWrapper(cameras: widget.cameras),
       routes: {
-        '/admin': (context) => AdminPanel(cameras: widget.cameras),
         '/profile': (context) => const ProfileScreen(),
         '/admin_home': (context) => AdminHomeScreen(cameras: widget.cameras),
         '/image_test': (context) => const ImageTestScreen(),
