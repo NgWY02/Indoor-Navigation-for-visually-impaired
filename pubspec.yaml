@@ -28,6 +28,7 @@ dependencies:
   collection: ^1.18.0
   flutter_dotenv: ^5.2.1
   app_links: ^6.3.2
+  http: ^1.2.2
   
 flutter:
   uses-material-design: true

@@ -47,6 +47,7 @@ class SupabaseService {
       if (client.auth.currentUser != null) {
         await _createBucketIfNotExists('maps');
         await _createBucketIfNotExists('place_images');
+        await _createBucketIfNotExists('reference-images'); // For VLM verification
       }
     } catch (e) {
       print('Error initializing storage buckets: $e');
