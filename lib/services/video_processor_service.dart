@@ -341,7 +341,7 @@ class VideoProcessorService {
         print("VideoProcessor: Created new node: $finalNodeId" + (referenceDirection != null ? " with direction: $referenceDirection°" : ""));
       }
       
-      // Process each frame and save embeddings
+      // Process each frame and save embeddings + corresponding reference images
       int successCount = 0;
       
       for (int i = 0; i < extractedFrames.length; i++) {
@@ -363,16 +363,27 @@ class VideoProcessorService {
           
           // Save to Supabase - Force create new embedding for each frame (360-degree video)
           print('VideoProcessor: Saving embedding to database');
-          final id = await _supabaseService.saveEmbedding(
+          final embeddingId = await _supabaseService.saveEmbedding(
             frameNodeName, 
             embedding,
             nodeId: finalNodeId, // Pass finalNodeId to saveEmbedding
             forceCreate: true, // Force create new embedding for each frame
           );
           
-          if (id != null) {
+          if (embeddingId != null) {
             successCount++;
-            print('VideoProcessor: Successfully saved embedding ${i + 1} with ID: $id');
+            print('VideoProcessor: Successfully saved embedding ${i + 1} with ID: $embeddingId');
+            
+            // Save corresponding reference image using embedding_id for precise linking
+            try {
+              print('VideoProcessor: Saving reference image for embedding $embeddingId...');
+              await _saveReferenceImageForEmbedding(embeddingId, extractedFrames[i], i + 1);
+              print('VideoProcessor: ✅ Reference image saved for embedding: $embeddingId');
+            } catch (refImageError) {
+              print('VideoProcessor: ⚠️ Failed to save reference image for embedding $embeddingId: $refImageError');
+              // Continue processing even if reference image fails
+            }
+            
           } else {
             print('VideoProcessor: Failed to save embedding ${i + 1}');
           }
@@ -424,5 +435,32 @@ class VideoProcessorService {
   void dispose() {
     // CLIP service uses HTTP client which is automatically disposed
     print('VideoProcessor: Disposing CLIP service resources');
+  }
+  
+  /// Save reference image for VLM verification using embedding_id for precise linking
+  Future<void> _saveReferenceImageForEmbedding(String embeddingId, File frameFile, int frameNumber) async {
+    try {
+      print('VideoProcessor: Uploading reference image for embedding: $embeddingId (frame $frameNumber)');
+      
+      // Use embedding_id as filename for precise 1:1 linking
+      final fileName = '${embeddingId}_reference.jpg';
+      
+      // Upload to reference-images bucket
+      final bytes = await frameFile.readAsBytes();
+      await SupabaseService().client.storage
+          .from('reference-images')
+          .uploadBinary(fileName, bytes);
+      
+      // Get public URL
+      final url = SupabaseService().client.storage
+          .from('reference-images')
+          .getPublicUrl(fileName);
+      
+      print('VideoProcessor: Reference image uploaded successfully: $url');
+      
+    } catch (e) {
+      print('VideoProcessor: Error saving reference image for embedding $embeddingId: $e');
+      rethrow;
+    }
   }
 }

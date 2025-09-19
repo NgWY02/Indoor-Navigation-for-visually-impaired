@@ -1,133 +1,180 @@
 import 'package:flutter/material.dart';
-import '../user/navigation_main_screen.dart';
+import 'navigation_main_screen.dart';
 import 'map_management.dart';
 import '../common/profile_screen.dart';
 import 'package:camera/camera.dart';
 
 class AdminHomeScreen extends StatelessWidget {
   final List<CameraDescription> cameras;
-  
+
   const AdminHomeScreen({Key? key, required this.cameras}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    final cameras = this.cameras; // Store reference to cameras
     final mediaQuery = MediaQuery.of(context);
-    final screenWidth = mediaQuery.size.width;
     final screenHeight = mediaQuery.size.height;
-    
-    // Responsive values for phones
-    final padding = screenWidth * 0.05; // 5% of screen width
-    final iconSize = screenWidth * 0.1; // 10% of screen width
-    final titleFontSize = screenWidth * 0.06; // 6% of screen width
-    final subtitleFontSize = screenWidth * 0.04; // 4% of screen width
-    final cardHeight = screenHeight * 0.12; // 12% of screen height
-    
+
+    // Phone-optimized sizing with small phone adjustments
+    final bool isSmallPhone = screenHeight < 600;
+    final double buttonHeight = isSmallPhone ? 94.0 : 98.0;
+    final double mainIconSize = 100.0;  
+    final double buttonIconSize = 45.0; 
+    final double titleFontSize = isSmallPhone ? 18.0 : 20.0;
+    final double subtitleFontSize = isSmallPhone ? 12.0 : 14.0;
+    final double padding = 24.0;
+
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Admin Dashboard'),
+        title: Semantics(
+          label: 'Admin Dashboard',
+          child: Text(
+            'Admin Dashboard',
+            style: TextStyle(
+              fontSize: isSmallPhone ? 20 : 22,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
         centerTitle: true,
-        backgroundColor: Colors.blueAccent,
-        elevation: 2,
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
       ),
       body: Container(
-        color: Colors.grey.shade100,
+        color: Colors.white, // High contrast background
         child: SafeArea(
           child: Padding(
             padding: EdgeInsets.all(padding),
             child: Column(
               children: [
-                // Welcome Section
+                // Welcome Header
                 Container(
-                  padding: EdgeInsets.symmetric(vertical: screenHeight * 0.03),
+                  padding: EdgeInsets.symmetric(vertical: isSmallPhone ? 12 : 16),
                   child: Column(
                     children: [
-                      Icon(
-                        Icons.admin_panel_settings,
-                        size: iconSize,
-                        color: Colors.blueAccent,
-                      ),
-                      SizedBox(height: screenHeight * 0.02),
-                      Text(
-                        'Welcome, Admin',
-                        style: TextStyle(
-                          fontSize: titleFontSize,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                      Semantics(
+                        label: 'NAVI app icon',
+                        child: Image.asset(
+                          'assets/icon.png',
+                          width: mainIconSize,
+                          height: mainIconSize,
+                          fit: BoxFit.contain,
                         ),
                       ),
-                      SizedBox(height: screenHeight * 0.01),
-                      Text(
-                        'Choose an option below',
-                        style: TextStyle(
-                          fontSize: subtitleFontSize,
-                          color: Colors.grey.shade600,
+                      const SizedBox(height: 12),
+                      Semantics(
+                        label: 'Welcome message for admin',
+                        child: Text(
+                          'Welcome, Admin',
+                          style: TextStyle(
+                            fontSize: titleFontSize,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Semantics(
+                        label: 'Instruction text',
+                        child: Text(
+                          'Choose an option below',
+                          style: TextStyle(
+                            fontSize: subtitleFontSize,
+                            color: Colors.black87,
+                          ),
+                          textAlign: TextAlign.center,
                         ),
                       ),
                     ],
                   ),
                 ),
-                // Menu Cards
+
+                SizedBox(height: isSmallPhone ? 20 : 24),
+
+                // Main Action Buttons
                 Expanded(
-                  child: ListView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      _buildMenuCard(
-                        context,
-                        icon: Icons.navigation,
-                        title: 'Navigation',
-                        subtitle: 'Test navigation system',
-                        color: Colors.green,
-                        cameras: cameras,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => NavigationMainScreen(
-                                camera: cameras.first,
+                      // Navigation Button
+                      Semantics(
+                        label: 'Navigation button',
+                        hint: 'Opens the navigation system for testing',
+                        button: true,
+                        child: _buildAccessibleButton(
+                          context: context,
+                          icon: Icons.navigation,
+                          title: 'Navigation',
+                          subtitle: 'Test navigation system',
+                          backgroundColor: Colors.green.shade600,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => NavigationMainScreen(
+                                  camera: cameras.first,
+                                ),
                               ),
-                            ),
-                          );
-                        },
-                        cardHeight: cardHeight,
-                        screenWidth: screenWidth,
-                        screenHeight: screenHeight,
+                            );
+                          },
+                          buttonHeight: buttonHeight,
+                          iconSize: buttonIconSize,
+                          titleFontSize: titleFontSize,
+                          subtitleFontSize: subtitleFontSize,
+                        ),
                       ),
-                      SizedBox(height: screenHeight * 0.02),
-                      _buildMenuCard(
-                        context,
-                        icon: Icons.map,
-                        title: 'Map Management',
-                        subtitle: 'Manage maps and nodes',
-                        color: Colors.orange,
-                        cameras: cameras,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => MapManagement(cameras: cameras),
-                            ),
-                          );
-                        },
-                        cardHeight: cardHeight,
-                        screenWidth: screenWidth,
-                        screenHeight: screenHeight,
+
+                      SizedBox(height: isSmallPhone ? 20 : 24),
+
+                      // Map Management Button
+                      Semantics(
+                        label: 'Map management button',
+                        hint: 'Opens map and node management tools',
+                        button: true,
+                        child: _buildAccessibleButton(
+                          context: context,
+                          icon: Icons.map,
+                          title: 'Map Management',
+                          subtitle: 'Manage maps and nodes',
+                          backgroundColor: Colors.orange.shade600,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => MapManagement(cameras: cameras),
+                              ),
+                            );
+                          },
+                          buttonHeight: buttonHeight,
+                          iconSize: buttonIconSize,
+                          titleFontSize: titleFontSize,
+                          subtitleFontSize: subtitleFontSize,
+                        ),
                       ),
-                      SizedBox(height: screenHeight * 0.02),
-                      _buildMenuCard(
-                        context,
-                        icon: Icons.person,
-                        title: 'Profile',
-                        subtitle: 'Account settings',
-                        color: Colors.purple,
-                        cameras: cameras,
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (context) => const ProfileScreen(),
-                            ),
-                          );
-                        },
-                        cardHeight: cardHeight,
-                        screenWidth: screenWidth,
-                        screenHeight: screenHeight,
+
+                      SizedBox(height: isSmallPhone ? 20 : 24),
+
+                      // Profile Button
+                      Semantics(
+                        label: 'Profile button',
+                        hint: 'Opens account settings and profile information',
+                        button: true,
+                        child: _buildAccessibleButton(
+                          context: context,
+                          icon: Icons.person,
+                          title: 'Profile',
+                          subtitle: 'Account settings',
+                          backgroundColor: Colors.blue.shade600,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (context) => const ProfileScreen(),
+                              ),
+                            );
+                          },
+                          buttonHeight: buttonHeight,
+                          iconSize: buttonIconSize,
+                          titleFontSize: titleFontSize,
+                          subtitleFontSize: subtitleFontSize,
+                        ),
                       ),
                     ],
                   ),
@@ -140,81 +187,75 @@ class AdminHomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildMenuCard(
-    BuildContext context, {
+  Widget _buildAccessibleButton({
+    required BuildContext context,
     required IconData icon,
     required String title,
     required String subtitle,
-    required Color color,
-    required List<CameraDescription> cameras,
+    required Color backgroundColor,
     required VoidCallback onTap,
-    required double cardHeight,
-    required double screenWidth,
-    required double screenHeight,
+    required double buttonHeight,
+    required double iconSize,
+    required double titleFontSize,
+    required double subtitleFontSize,
   }) {
-    final iconSize = screenWidth * 0.08;
-    final titleFontSize = screenWidth * 0.045;
-    final subtitleFontSize = screenWidth * 0.035;
-    
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+    return Container(
+      height: buttonHeight,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black, width: 2),
       ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          height: cardHeight,
-          padding: EdgeInsets.all(screenWidth * 0.04),
-          child: Row(
-            children: [
-              Container(
-                padding: EdgeInsets.all(screenWidth * 0.03),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            child: Row(
+              children: [
+                Icon(
                   icon,
+                  color: Colors.white,
                   size: iconSize,
-                  color: color,
                 ),
-              ),
-              SizedBox(width: screenWidth * 0.04),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: titleFontSize,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87,
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: titleFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                    SizedBox(height: screenHeight * 0.005),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: subtitleFontSize,
-                        color: Colors.grey.shade600,
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: subtitleFontSize,
+                          color: Colors.white.withOpacity(0.9),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              Icon(
-                Icons.arrow_forward_ios,
-                size: iconSize * 0.6,
-                color: Colors.grey.shade400,
-              ),
-            ],
+                Icon(
+                  Icons.arrow_forward,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
-} 
+}

@@ -39,20 +39,21 @@ class RealTimeNavigationService {
   double? _currentHeading;
   List<double>? _lastCapturedEmbedding;
   DateTime _lastGuidanceTime = DateTime.now();
+  DateTime? _lastVisualMatchTime; // Track when we last had a visual match
   
   // YOLO toggle state
   bool _disableYolo = false;
   
   // Configuration - ALL threshold constants are centralized HERE
   // To change any threshold value, modify these constants only
-  static const double _waypointReachedThresholdDefault = 0.9;  // Main navigation threshold
-  static const double _cleanSceneThreshold = 0.9;  // For clean-to-clean comparisons
+  static const double _waypointReachedThresholdDefault = 0.87;  // Main navigation threshold
+  static const double _cleanSceneThreshold = 0.87;  // For clean-to-clean comparisons
   static const double _peoplePresentThreshold = 0.75;  // For scenes with people
   static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
-  static const double _turnWaypointThreshold = 0.935;  // Higher threshold for turn waypoints (left/right/U-turn)
+  static const double _turnWaypointThreshold = 0.9;  // Higher threshold for turn waypoints (left/right/U-turn)
   static const Duration _guidanceInterval = Duration(seconds: 1);
   static const Duration _repositioningTimeout = Duration(seconds: 10);  // Dynamic threshold and audio management
-  double _currentWaypointThreshold = 0.9;
+  double _currentWaypointThreshold = 0.87;
   String? _lastSpokenInstruction;
   DateTime? _lastInstructionTime;
   
@@ -91,8 +92,8 @@ class RealTimeNavigationService {
   NavigationState get state => _state;
   NavigationRoute? get currentRoute => _currentRoute;
   int get currentWaypointIndex => _currentWaypointIndex;
-  double get progressPercentage => _currentRoute != null 
-      ? ((_currentWaypointIndex + 1) / _currentRoute!.waypoints.length) * 100 
+  double get progressPercentage => _currentRoute != null
+      ? ((_currentSequenceNumber + 1) / _currentRoute!.waypoints.length) * 100
       : 0.0;
   
   /// Get the current compass heading (null if not available)
@@ -139,6 +140,7 @@ class RealTimeNavigationService {
       // Reset audio tracking for new navigation session
       _lastSpokenInstruction = null;
       _lastInstructionTime = null;
+      _lastVisualMatchTime = null; // Reset visual match tracking
       _currentWaypointThreshold = _waypointReachedThresholdDefault;
       
       // Reset all failure counters for new navigation session
@@ -190,6 +192,7 @@ class RealTimeNavigationService {
     // Reset audio tracking and people detection state
     _lastSpokenInstruction = null;
     _lastInstructionTime = null;
+    _lastVisualMatchTime = null;
     _currentWaypointThreshold = _waypointReachedThresholdDefault;
     
     // Reset all failure counters
@@ -222,10 +225,21 @@ class RealTimeNavigationService {
     print('🎯 Target heading for first waypoint: ${firstWaypoint.heading.toStringAsFixed(1)}°');
     
     _updateDebugDisplay('🧭 INITIAL ORIENTATION\n🎯 Target: ${firstWaypoint.heading.toStringAsFixed(1)}°\n⏳ Waiting for your compass reading...');
-    
-    await _speak('Turn slowly until I say stop.');
+
+    // Audio feedback for orientation start
+    await _speak('Starting orientation. Please face the correct direction for navigation.');
+    onStatusUpdate?.call('Starting orientation - face the correct direction');
+
+    await _speak('Starting Orientation.Turn slowly until I say stop.');
     onStatusUpdate?.call('Turn slowly - finding correct direction');
-    
+
+    // Update debug display to show waiting period
+    _updateDebugDisplay('🧭 GETTING READY\n⏳ Please wait while I prepare orientation...\n🎯 Keep your phone steady');
+    onStatusUpdate?.call('Preparing orientation system...');
+
+    // Wait a few seconds for user to process the initial instructions before starting orientation checking
+    await Future.delayed(Duration(seconds: 3));
+
     // Start periodic orientation checking
     _navigationTimer = Timer.periodic(Duration(seconds: 1), (_) => _checkOrientation());
   }
@@ -376,8 +390,11 @@ class RealTimeNavigationService {
     _navigationTimer?.cancel(); // Stop orientation timer
     
     // First, tell the user they're correctly oriented and wait
-    await _speak('Perfect! Correct direction.');
+    await _speak('Perfect! You are now facing the correct direction.');
     onStatusUpdate?.call('Direction confirmed - preparing navigation');
+
+    await _speak('Navigation will begin shortly. Keep facing this direction.');
+    onStatusUpdate?.call('Preparing navigation...');
     
     print('✅ User is correctly oriented - confirming before navigation');
     _updateDebugDisplay('✅ ORIENTATION COMPLETE\n⏳ Preparing navigation...\n� Getting ready to start...');
@@ -390,17 +407,30 @@ class RealTimeNavigationService {
       onStatusUpdate?.call('Navigation started');
       
       print('🚀 Starting actual navigation after orientation confirmation');
-      _updateDebugDisplay('�🚀 NAVIGATION STARTED\n📍 Moving to waypoint guidance...');
+      _updateDebugDisplay('''
+🚀 NAVIGATION STARTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📍 Orientation complete - ready for waypoint guidance
+🎯 Waiting for first visual match with waypoint 0
+⏳ Camera processing will provide turn-by-turn guidance
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+''');
       
       // Reset guidance time to prevent immediate guidance
       _lastGuidanceTime = DateTime.now();
-      
-      // Don't give immediate instruction - wait for first waypoint match
-      // Only update UI instruction without audio
-      await _updateNavigationInstructionSilent();
-      
+
+      // DON'T provide waypoint instruction during orientation
+      // Wait for first visual match before providing navigation guidance
+      // Only compass guidance should be given during orientation phase
+
       // Start periodic navigation guidance
       _navigationTimer = Timer.periodic(_guidanceInterval, (_) => _checkProgress());
+
+      // Provide initial guidance for the first waypoint
+      final firstWaypoint = _getWaypointBySequence(0);
+      if (firstWaypoint != null) {
+        await _provideGuidance(firstWaypoint, 0.5);
+      }
     });
   }
 
@@ -416,7 +446,7 @@ class RealTimeNavigationService {
     
     print('⏩ User chose to skip orientation - starting navigation directly');
     await _speak('Skipping orientation. Starting navigation.');
-    
+
     await _orientationComplete();
   }
 
@@ -454,8 +484,8 @@ class RealTimeNavigationService {
       _currentWaypointThreshold = (isBeforeTurnWaypoint || isFinalWaypoint) ? _turnWaypointThreshold : navigationResult.recommendedThreshold;
       
       print('🎯 Navigation frame: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
-      String thresholdReason = isFinalWaypoint ? 'FINAL WAYPOINT (0.935)' :
-                              isBeforeTurnWaypoint ? 'BEFORE TURN (0.935)' :
+      String thresholdReason = isFinalWaypoint ? 'FINAL WAYPOINT (0.9)' :
+                              isBeforeTurnWaypoint ? 'BEFORE TURN (0.9)' :
                               'NORMAL (' + navigationResult.recommendedThreshold.toStringAsFixed(2) + ')';
       print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} ($thresholdReason)');
       print('🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}');
@@ -481,7 +511,7 @@ class RealTimeNavigationService {
           🔍 WAYPOINT MATCHING:
           ━━━━━━━━━━━━━━━━━━━━
           📍 Target: ${targetWaypoint.landmarkDescription ?? 'No landmark'} (Seq ${_currentSequenceNumber})
-          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isFinalWaypoint ? "FINAL WAYPOINT (0.935 threshold)" : isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.935 threshold)" : ""}
+          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isFinalWaypoint ? "FINAL WAYPOINT (0.9 threshold)" : isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.9 threshold)" : ""}
           🎯 YOLO: ${_disableYolo ? 'DISABLED' : 'ENABLED'}
           When Recorded: ${targetWaypoint.peopleDetected ? "YES (${targetWaypoint.peopleCount} people)" : "NO people"}
           Now Detecting: ${navigationResult.peopleDetected ? "YES (${navigationResult.peopleCount} people)" : "NO people"} ${_disableYolo ? "(YOLO disabled)" : "(YOLO active)"}
@@ -500,6 +530,12 @@ class RealTimeNavigationService {
         print('✅ All conditions met - Waypoint reached!');
         // Reset failure counter on successful waypoint match
         _consecutiveWaypointFailures = 0;
+        // Record visual match timestamp for guidance logic
+        _lastVisualMatchTime = DateTime.now();
+
+        // Provide guidance immediately when there's a visual match
+        await _provideGuidance(targetWaypoint, similarity);
+
         await _waypointReached();
       } else {
         // Track consecutive waypoint progression failures
@@ -519,12 +555,15 @@ class RealTimeNavigationService {
       await _speak('Complete direction guidance first');
       return;
     }
-    
+
+    // Reset visual match time when repositioning
+    _lastVisualMatchTime = null;
+
     _setState(NavigationState.reorientingUser);
-    
+
     await _speak('Look around slowly to get back on track.');
     onStatusUpdate?.call('Repositioning - look around slowly');
-    
+
     // Give user time to reorient
     Timer(_repositioningTimeout, () {
       if (_state == NavigationState.reorientingUser) {
@@ -586,7 +625,7 @@ class RealTimeNavigationService {
 
   Future<void> _checkProgress() async {
     if (_currentRoute == null || _state != NavigationState.navigating) return;
-    
+
     // Get current waypoint by sequence number (not array index!)
     final targetWaypoint = _getWaypointBySequence(_currentSequenceNumber);
     if (targetWaypoint == null) {
@@ -595,14 +634,18 @@ class RealTimeNavigationService {
     }
 
     print('Current target: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
-    
-    // Periodically remind user of current instruction if no recent progress
-    final timeSinceLastGuidance = DateTime.now().difference(_lastGuidanceTime);
-    
-    // Increased reminder interval from 15 to 30 seconds to reduce repetition
-    if (timeSinceLastGuidance > Duration(seconds: 30)) {
-      await _provideGuidance(targetWaypoint, 0.5); // Provide reminder
-    }
+
+    // Guidance is now only provided when there's an actual visual match
+    // This method is used for monitoring and recovery triggering only
+    final now = DateTime.now();
+    final timeSinceLastVisualMatch = _lastVisualMatchTime != null ?
+                                   now.difference(_lastVisualMatchTime!) :
+                                   Duration(days: 1); // If no match ever, set to a large duration
+
+    print('📊 Monitoring: Last visual match ${timeSinceLastVisualMatch.inSeconds}s ago');
+
+    // Could add recovery logic here if no visual match for too long
+    // For now, just monitor without providing guidance
   }
 
   /// Find waypoint by sequence number (proper navigation logic)
@@ -653,7 +696,7 @@ class RealTimeNavigationService {
     // Move to NEXT SEQUENCE NUMBER, not array index!
     _currentSequenceNumber++;
     print('Moving to next sequence: $_currentSequenceNumber');
-    
+
     // Check if there's a next waypoint
     final nextWaypoint = _getWaypointBySequence(_currentSequenceNumber);
     if (nextWaypoint == null) {
@@ -662,7 +705,7 @@ class RealTimeNavigationService {
     } else {
       // Continue to next waypoint
       _setState(NavigationState.navigating);
-      // Only provide audio guidance after successful waypoint progression
+      // Provide initial guidance for the new waypoint
       await _updateNavigationInstruction();
     }
   }
@@ -778,9 +821,9 @@ class RealTimeNavigationService {
       print('🚨 5 consecutive waypoint failures - starting recovery system');
       await _startWaypointRecovery();
     } else {
-      // Normal guidance while tracking failures
-      print('⚠️ Waypoint failure ${_consecutiveWaypointFailures}/$_waypointFailureThreshold - continuing with guidance');
-      await _provideGuidance(targetWaypoint, similarity);
+      // Don't provide guidance on waypoint failure
+      // Only provide guidance when there's an actual visual match
+      print('⚠️ Waypoint failure ${_consecutiveWaypointFailures}/$_waypointFailureThreshold - waiting for visual match');
     }
   }
 
@@ -789,6 +832,8 @@ class RealTimeNavigationService {
     _setState(NavigationState.awaitingManualCapture);
     _manualCaptureCount = 0;
     _capturedRecoveryFrames.clear();
+    // Reset visual match time when entering recovery
+    _lastVisualMatchTime = null;
     
     await _speak('Having trouble finding waypoint. Stop and look forward. Capturing images to find location.');
     onStatusUpdate?.call('Recovery mode - preparing manual capture');
@@ -884,9 +929,12 @@ class RealTimeNavigationService {
         _currentSequenceNumber = matchedWaypoint.sequenceNumber;
         _consecutiveWaypointFailures = 0;
         _recoveryAttempts = 0;
-        
+        // Set visual match time to now since we found the location
+        _lastVisualMatchTime = DateTime.now();
+
           _setState(NavigationState.navigating);
-        await _updateNavigationInstruction();
+        // Provide guidance after successful recovery
+        await _provideGuidance(matchedWaypoint, 0.5);
         
         // Clean up captured frames
         await _cleanupRecoveryFrames();
@@ -1106,23 +1154,6 @@ class RealTimeNavigationService {
     await _speakSmart(instruction.spokenInstruction);
   }
 
-  /// Update navigation instruction without audio (for initial setup)
-  Future<void> _updateNavigationInstructionSilent() async {
-    if (_currentRoute == null) return;
-    
-    // Get waypoint by sequence number, not array index
-    final targetWaypoint = _getWaypointBySequence(_currentSequenceNumber);
-    if (targetWaypoint == null) {
-      print('No waypoint found for sequence $_currentSequenceNumber');
-      return;
-    }
-    
-    final instruction = await _createNavigationInstruction(targetWaypoint, 0.5);
-    
-    // Only update UI, no audio
-    onInstructionUpdate?.call(instruction);
-    print('Navigation instruction updated (silent): ${instruction.spokenInstruction}');
-  }
 
   Future<void> _speak(String text) async {
     try {

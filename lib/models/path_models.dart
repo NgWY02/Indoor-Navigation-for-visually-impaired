@@ -539,4 +539,4 @@ class TurnStatusResult {
       message: json['message'],
     );
   }
-} 
+}

@@ -636,25 +636,25 @@ def inpaint_people_from_image_bytes(image_bytes: bytes) -> Optional[Image.Image]
 def initialize_dinov2_model():
     """Initialize DINOv2 model for superior spatial discrimination"""
     global dinov2_model, dinov2_processor
-    
+
     if not DINOV2_AVAILABLE:
         return False
-        
+
     try:
         print(f"🔄 Loading DINOv2-base model on {_device_str}...")
-        
-        # Load DINOv2 base model (384-dim embeddings, excellent spatial understanding)
+
+        # Load DINOv2 base model (768-dim embeddings, excellent spatial understanding)
         dinov2_model = Dinov2Model.from_pretrained('facebook/dinov2-base')
         dinov2_processor = AutoImageProcessor.from_pretrained('facebook/dinov2-base')
-        
+
         dinov2_model.to(_device_str)
         dinov2_model.eval()
-        
+
         print(f"✅ DINOv2-base model loaded successfully on {_device_str}")
         print(f"📊 Model parameters: ~86M, 768-dim embeddings (superior spatial discrimination)")
-        
+
         return True
-        
+
     except Exception as e:
         print(f"❌ Failed to load DINOv2 model: {e}")
         return False

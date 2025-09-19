@@ -53,7 +53,7 @@ class ContinuousPathRecorder {
   
   // Configuration
   final Duration _captureInterval = const Duration(seconds: 3);
-  final double _significantHeadingChange = 30; // Minimum for decision point
+  final double _significantHeadingChange = 45; // Minimum for decision point
   final Uuid _uuid = const Uuid();
   
   // Current state

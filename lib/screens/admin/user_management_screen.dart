@@ -105,7 +105,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     final isSmallScreen = screenSize.width < 360;
 
     final TextEditingController nameController = TextEditingController();
-    final TextEditingController descriptionController = TextEditingController();
     bool isCreating = false;
 
     showDialog(
@@ -136,23 +135,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 ),
                 enabled: !isCreating,
               ),
-              SizedBox(height: isSmallScreen ? 12 : 16),
-              TextField(
-                controller: descriptionController,
-                decoration: InputDecoration(
-                  labelText: 'Description',
-                  hintText: 'Enter organization description',
-                  contentPadding: EdgeInsets.symmetric(
-                    horizontal: isSmallScreen ? 12 : 16,
-                    vertical: isSmallScreen ? 12 : 16,
-                  ),
-                ),
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 14 : 16,
-                ),
-                maxLines: isSmallScreen ? 2 : 3,
-                enabled: !isCreating,
-              ),
             ],
           ),
           actions: [
@@ -181,7 +163,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       try {
                         await _supabaseService.createOrganization(
                           nameController.text.trim(),
-                          descriptionController.text.trim(),
                         );
 
                         if (mounted) {
@@ -266,53 +247,94 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
-    final screenSize = mediaQuery.size;
+    final screenHeight = mediaQuery.size.height;
     final viewPadding = mediaQuery.viewPadding;
-    final isSmallScreen = screenSize.width < 360;
-    final isMediumScreen = screenSize.width >= 360 && screenSize.width < 600;
 
-    // Calculate responsive padding
-    final horizontalPadding = isSmallScreen ? 8.0 : isMediumScreen ? 12.0 : 16.0;
-    final verticalPadding = isSmallScreen ? 8.0 : 12.0;
+    // Phone-optimized sizing with small phone adjustments
+    final bool isSmallPhone = screenHeight < 600;
+    final bool isSmallScreen = screenHeight < 600; 
+    final double buttonHeight = isSmallPhone ? 92.0 : 96.0;
+    final double iconSize = 40.0;
+    final double titleFontSize = isSmallPhone ? 16.0 : 18.0;
+    final double subtitleFontSize = isSmallPhone ? 12.0 : 14.0;
+    final double padding = 24.0;
+    final double verticalPadding = padding;
+    final double horizontalPadding = padding;
 
     if (_isLoading) {
       return Scaffold(
-        body: SafeArea(
-          child: Center(
-            child: CircularProgressIndicator(),
+        backgroundColor: Colors.white,
+        appBar: AppBar(
+          title: Semantics(
+            label: 'Organization management loading',
+            child: const Text('Organization Management'),
           ),
+          backgroundColor: Colors.black,
+          elevation: 0,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(
+          child: CircularProgressIndicator(),
         ),
       );
     }
 
     if (_errorMessage != null) {
       return Scaffold(
+        backgroundColor: Colors.white,
         appBar: AppBar(
-          title: const Text('User Management'),
-          toolbarHeight: isSmallScreen ? 48 : 56,
+          title: Semantics(
+            label: 'Organization management error',
+            child: const Text('Organization Management'),
+          ),
+          backgroundColor: Colors.black,
+          elevation: 0,
+          foregroundColor: Colors.white,
         ),
         body: SafeArea(
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+            padding: EdgeInsets.all(padding),
             child: Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.error_outline,
-                      size: isSmallScreen ? 48 : 64,
-                      color: Colors.red),
-                  SizedBox(height: verticalPadding),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      fontSize: isSmallScreen ? 14 : 16,
+                  Semantics(
+                    label: 'Error icon',
+                    child: Icon(
+                      Icons.error_outline,
+                      size: 64,
+                      color: Colors.red,
                     ),
-                    textAlign: TextAlign.center,
                   ),
-                  SizedBox(height: verticalPadding),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    child: const Text('Retry'),
+                  const SizedBox(height: 24),
+                  Semantics(
+                    label: 'Error message',
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        fontSize: titleFontSize,
+                        color: Colors.black,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Semantics(
+                    label: 'Retry button',
+                    hint: 'Tap to retry loading data',
+                    button: true,
+                    child: _buildAccessibleButton(
+                      context: context,
+                      icon: Icons.refresh,
+                      title: 'Retry',
+                      subtitle: 'Try loading data again',
+                      backgroundColor: Colors.blue.shade600,
+                      onTap: _loadData,
+                      buttonHeight: buttonHeight,
+                      iconSize: iconSize,
+                      titleFontSize: titleFontSize,
+                      subtitleFontSize: subtitleFontSize,
+                    ),
                   ),
                 ],
               ),
@@ -323,54 +345,76 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     }
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('User Management'),
-        backgroundColor: Colors.blue.shade700,
-        foregroundColor: Colors.white,
+        title: Semantics(
+          label: 'Organization management screen',
+          child: const Text('Organization Management'),
+        ),
+        backgroundColor: Colors.black,
         elevation: 0,
+        foregroundColor: Colors.white,
       ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _loadData,
-          color: Theme.of(context).primaryColor,
+          color: Colors.blue.shade600,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.all(horizontalPadding),
+            padding: EdgeInsets.all(padding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Quick Actions Row
-                Row(
-                  children: [
-                    Expanded(
-                      child: _buildQuickActionCard(
-                        icon: Icons.add_business,
-                        title: 'Create Organization',
-                        subtitle: 'Add new org',
-                        color: Colors.green,
-                        onTap: _showCreateOrganizationDialog,
-                        isSmallScreen: isSmallScreen,
-                        horizontalPadding: horizontalPadding,
-                        verticalPadding: verticalPadding,
-                      ),
+                // Quick Actions
+                Semantics(
+                  label: 'Quick actions section',
+                  child: Text(
+                    'Quick Actions',
+                    style: TextStyle(
+                      fontSize: titleFontSize + 2,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
                     ),
-                    SizedBox(width: horizontalPadding / 2),
-                    Expanded(
-                      child: _buildQuickActionCard(
-                        icon: Icons.assignment_ind,
-                        title: 'Assign Users',
-                        subtitle: 'Manage assignments',
-                        color: Colors.blue,
-                        onTap: () => _showAssignmentDialog(horizontalPadding, verticalPadding, viewPadding),
-                        isSmallScreen: isSmallScreen,
-                        horizontalPadding: horizontalPadding,
-                        verticalPadding: verticalPadding,
-                      ),
-                    ),
-                  ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Semantics(
+                  label: 'Create organization button',
+                  hint: 'Opens dialog to create new organization',
+                  button: true,
+                  child: _buildAccessibleButton(
+                    context: context,
+                    icon: Icons.add_business,
+                    title: 'Create Organization',
+                    subtitle: 'Add new organization',
+                    backgroundColor: Colors.green.shade600,
+                    onTap: _showCreateOrganizationDialog,
+                    buttonHeight: buttonHeight,
+                    iconSize: iconSize,
+                    titleFontSize: titleFontSize,
+                    subtitleFontSize: subtitleFontSize,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Semantics(
+                  label: 'Assign users button',
+                  hint: 'Opens dialog to assign users to organizations',
+                  button: true,
+                  child: _buildAccessibleButton(
+                    context: context,
+                    icon: Icons.assignment_ind,
+                    title: 'Assign Users',
+                    subtitle: 'Manage user assignments',
+                    backgroundColor: Colors.blue.shade600,
+                    onTap: () => _showAssignmentDialog(padding, padding, viewPadding),
+                    buttonHeight: buttonHeight,
+                    iconSize: iconSize,
+                    titleFontSize: titleFontSize,
+                    subtitleFontSize: subtitleFontSize,
+                  ),
                 ),
 
-                SizedBox(height: verticalPadding),
+                SizedBox(height: padding),
 
                 // Organizations Section
                 _buildSectionHeader(
@@ -566,57 +610,6 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  Widget _buildQuickActionCard({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color color,
-    required VoidCallback onTap,
-    required bool isSmallScreen,
-    required double horizontalPadding,
-    required double verticalPadding,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: EdgeInsets.all(horizontalPadding / 2),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.grey[200]!),
-        ),
-        child: Column(
-          children: [
-            Icon(
-              icon,
-              color: color,
-              size: isSmallScreen ? 24 : 28,
-            ),
-            SizedBox(height: verticalPadding / 4),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: isSmallScreen ? 12 : 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[800],
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            Text(
-              subtitle,
-              style: TextStyle(
-                fontSize: isSmallScreen ? 10 : 11,
-                color: Colors.grey[500],
-              ),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildSectionHeader(String title, String count, bool isSmallScreen) {
     return Row(
@@ -1159,5 +1152,77 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
         );
       }
     }
+  }
+
+  Widget _buildAccessibleButton({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color backgroundColor,
+    required VoidCallback onTap,
+    required double buttonHeight,
+    required double iconSize,
+    required double titleFontSize,
+    required double subtitleFontSize,
+  }) {
+    return Container(
+      height: buttonHeight,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black, width: 2),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: Colors.white,
+                  size: iconSize,
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: titleFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: subtitleFontSize,
+                          color: Colors.white.withOpacity(0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }

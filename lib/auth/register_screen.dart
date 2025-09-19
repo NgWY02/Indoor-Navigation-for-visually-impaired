@@ -125,20 +125,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
     final screenWidth = mediaQuery.size.width;
+    final screenHeight = mediaQuery.size.height;
     final keyboardHeight = mediaQuery.viewInsets.bottom;
     final isKeyboardVisible = keyboardHeight > 0;
-    
-    // Phone-focused responsive sizing
-    final iconSize = isKeyboardVisible ? 50.0 : 70.0;
-    final titleFontSize = screenWidth < 360 ? 20.0 : 22.0;
-    final horizontalPadding = screenWidth * 0.05; 
-    final verticalSpacing = isKeyboardVisible ? 10.0 : 16.0;
+
+    // Phone-focused responsive sizing with small phone adjustments
+    final bool isSmallPhone = screenHeight < 600;
+    final double iconSize = isKeyboardVisible ? 50.0 : 70.0;
+    final double titleFontSize = screenWidth < 360 ? 20.0 : 22.0;
+    final double subtitleFontSize = isSmallPhone ? 12.0 : 14.0;
+    final double horizontalPadding = screenWidth * 0.05;
+    final double verticalSpacing = isKeyboardVisible ? 10.0 : 16.0;
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        title: const Text('Register'),
+        title: Semantics(
+          label: 'Register screen',
+          child: const Text('Register'),
+        ),
         elevation: 0,
-        backgroundColor: Colors.blue.shade700,
+        backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
       body: SafeArea(
@@ -155,85 +162,138 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     if (!isKeyboardVisible) ...[
-                      Icon(
-                        Icons.person_add,
-                        size: iconSize,
-                        color: Colors.blue,
+                      Semantics(
+                        label: 'Registration icon',
+                        child: Icon(
+                          Icons.person_add,
+                          size: iconSize,
+                          color: Colors.black,
+                        ),
                       ),
                       SizedBox(height: verticalSpacing),
                     ],
-                    Text(
-                      'Create an Account',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: titleFontSize,
-                        fontWeight: FontWeight.bold,
+                    Semantics(
+                      label: 'Registration title',
+                      child: Text(
+                        'Create an Account',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: titleFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black,
+                        ),
                       ),
                     ),
                     SizedBox(height: verticalSpacing * 1.5),
                     if (_errorMessage != null) ...[
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.red[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red.shade300),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.error_outline, 
-                                 color: Colors.red.shade700, size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                _errorMessage!,
-                                style: TextStyle(
-                                  color: Colors.red.shade800,
-                                  fontSize: 14,
+                      Semantics(
+                        label: 'Error message',
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.red.shade600, width: 2),
+                          ),
+                          child: Row(
+                            children: [
+                              Semantics(
+                                label: 'Error icon',
+                                child: Icon(
+                                  Icons.error_outline,
+                                  color: Colors.red.shade600,
+                                  size: 24,
                                 ),
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage!,
+                                  style: TextStyle(
+                                    color: Colors.red.shade800,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       SizedBox(height: verticalSpacing),
                     ],
-                    TextFormField(
-                      controller: _emailController,
-                      style: const TextStyle(fontSize: 16),
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.email),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
+                    Semantics(
+                      label: 'Email input field',
+                      hint: 'Enter your email address',
+                      textField: true,
+                      child: TextFormField(
+                        controller: _emailController,
+                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        decoration: InputDecoration(
+                          labelText: 'Email',
+                          labelStyle: const TextStyle(color: Colors.black87),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black54, width: 1),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white,
+                          prefixIcon: const Icon(Icons.email, color: Colors.black87),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
                         ),
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter your email';
+                          }
+                          if (!value.contains('@') || !value.contains('.')) {
+                            return 'Please enter a valid email';
+                          }
+                          return null;
+                        },
                       ),
-                      keyboardType: TextInputType.emailAddress,
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter your email';
-                        }
-                        if (!value.contains('@') || !value.contains('.')) {
-                          return 'Please enter a valid email';
-                        }
-                        return null;
-                      },
                     ),
                     SizedBox(height: verticalSpacing),
-                    TextFormField(
-                      controller: _passwordController,
-                      style: const TextStyle(fontSize: 16),
-                      decoration: const InputDecoration(
-                        labelText: 'Password',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.lock),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
+                    Semantics(
+                      label: 'Password input field',
+                      hint: 'Enter your password',
+                      textField: true,
+                      child: TextFormField(
+                        controller: _passwordController,
+                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          labelStyle: const TextStyle(color: Colors.black87),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black54, width: 1),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white,
+                          prefixIcon: const Icon(Icons.lock, color: Colors.black87),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
                         ),
-                      ),
                       obscureText: true,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -244,20 +304,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         }
                         return null;
                       },
+                      ),
                     ),
                     SizedBox(height: verticalSpacing),
-                    TextFormField(
-                      controller: _confirmPasswordController,
-                      style: const TextStyle(fontSize: 16),
-                      decoration: const InputDecoration(
-                        labelText: 'Confirm Password',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.lock_outline),
-                        contentPadding: EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 16,
+                    Semantics(
+                      label: 'Confirm password input field',
+                      hint: 'Re-enter your password to confirm',
+                      textField: true,
+                      child: TextFormField(
+                        controller: _confirmPasswordController,
+                        style: const TextStyle(fontSize: 16, color: Colors.black),
+                        decoration: InputDecoration(
+                          labelText: 'Confirm Password',
+                          labelStyle: const TextStyle(color: Colors.black87),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black54, width: 1),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(color: Colors.black, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: Colors.white,
+                          prefixIcon: const Icon(Icons.lock_outline, color: Colors.black87),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
                         ),
-                      ),
                       obscureText: true,
                       validator: (value) {
                         if (value == null || value.isEmpty) {
@@ -268,46 +347,59 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         }
                         return null;
                       },
+                      ),
                     ),
                     SizedBox(height: verticalSpacing),
                     
                     // Only show this if admin creation is allowed
-                    if (widget.allowAdminCreation)
-                      Card(
-                        child: SwitchListTile(
-                          title: const Text(
-                            'Register as Admin',
-                            style: TextStyle(fontSize: 16),
-                          ),
-                          subtitle: const Text(
-                            'Special privileges for system management',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          value: _isAdmin,
-                          onChanged: (value) {
-                            setState(() {
-                              _isAdmin = value;
-                              _showAdminCodeField = value;
-                            });
-                          },
-                        ),
+                    widget.allowAdminCreation ? Card(
+                      child: SwitchListTile(
+                        title: const Text('Register as Admin'),
+                        subtitle: const Text('Special privileges for system management'),
+                        value: _isAdmin,
+                        onChanged: (value) {
+                          setState(() {
+                            _isAdmin = value;
+                            _showAdminCodeField = value;
+                          });
+                        },
                       ),
-                    
+                    ) : const SizedBox.shrink(),
+
                     // Admin code field - only shown when admin option selected
-                    if (_showAdminCodeField) ...[
-                      SizedBox(height: verticalSpacing),
-                      TextFormField(
-                        controller: _adminCodeController,
-                        style: const TextStyle(fontSize: 16),
-                        decoration: const InputDecoration(
-                          labelText: 'Admin Registration Code',
-                          border: OutlineInputBorder(),
-                          prefixIcon: Icon(Icons.admin_panel_settings),
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 16,
+                    _showAdminCodeField ? Column(
+                      children: [
+                        SizedBox(height: verticalSpacing),
+                        Semantics(
+                        label: 'Admin code input field',
+                        hint: 'Enter the admin registration code',
+                        textField: true,
+                        child: TextFormField(
+                          controller: _adminCodeController,
+                          style: const TextStyle(fontSize: 16, color: Colors.black),
+                          decoration: InputDecoration(
+                            labelText: 'Admin Registration Code',
+                            labelStyle: const TextStyle(color: Colors.black87),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.black, width: 2),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.black54, width: 1),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(color: Colors.black, width: 2),
+                            ),
+                            filled: true,
+                            fillColor: Colors.white,
+                            prefixIcon: const Icon(Icons.admin_panel_settings, color: Colors.black87),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
                           ),
-                        ),
                         obscureText: true,
                         validator: (value) {
                           if (_isAdmin) {
@@ -317,43 +409,61 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           }
                           return null;
                         },
-                      ),
-                    ],
-                    
-                    SizedBox(height: verticalSpacing * 2),
-                    ElevatedButton(
-                      onPressed: _isLoading ? null : _signUp,
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
                         ),
+                        ),
+                      ],
+                    ) : const SizedBox.shrink(),
+
+                    SizedBox(height: verticalSpacing * 2),
+                    Semantics(
+                      label: 'Register button',
+                      hint: 'Tap to create your account',
+                      button: true,
+                      child: ElevatedButton(
+                        onPressed: _isLoading ? null : _signUp,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.shade600,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                        ),
+                        child: _isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                'Register',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 2,
-                              ),
-                            )
-                          : const Text(
-                              'Register',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
                     ),
                     SizedBox(height: verticalSpacing),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                      },
-                      child: const Text(
-                        'Already have an account? Login',
-                        style: TextStyle(fontSize: 14),
+                    Semantics(
+                      label: 'Login link',
+                      hint: 'Tap to go back to login screen',
+                      button: true,
+                      child: TextButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                        },
+                        child: const Text(
+                          'Already have an account? Login',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.black87,
+                          ),
+                        ),
                       ),
                     ),
                     // Extra bottom padding for safe area
