@@ -833,8 +833,51 @@ class SupabaseService {
       print(
           'Found ${nodeIds.length} nodes associated with map $mapId: $nodeIds');
 
-      // 2. Delete associated place_embeddings (if any nodes exist)
+      // 2. Delete navigation paths and waypoints that reference the map's nodes
       if (nodeIds.isNotEmpty) {
+        print('Deleting navigation paths that reference nodes: $nodeIds');
+
+        // Find all navigation paths that reference any of the map's nodes
+        final navigationPathsResponse = await client
+            .from('navigation_paths')
+            .select('id')
+            .or('start_location_id.in.(${nodeIds.join(',')}),end_location_id.in.(${nodeIds.join(',')})');
+
+        final navigationPathIds = (navigationPathsResponse as List)
+            .map((path) => path['id'] as String)
+            .toList();
+
+        if (navigationPathIds.isNotEmpty) {
+          print('Found ${navigationPathIds.length} navigation paths referencing map nodes');
+
+          // Delete waypoints for these paths
+          await client
+              .from('path_waypoints')
+              .delete()
+              .inFilter('path_id', navigationPathIds);
+          print('Deleted waypoints for navigation paths');
+
+          // Delete the navigation paths themselves
+          await client
+              .from('navigation_paths')
+              .delete()
+              .inFilter('id', navigationPathIds);
+          print('Deleted navigation paths');
+        }
+
+        // 3. Delete associated reference images from storage bucket
+        print('Deleting reference images for nodes: $nodeIds');
+        final imageFileNames = nodeIds.map((nodeId) => '${nodeId}_reference.jpg').toList();
+        try {
+          await client.storage
+              .from('reference-images')
+              .remove(imageFileNames);
+          print('Deleted ${imageFileNames.length} reference images');
+        } catch (imageError) {
+          print('Some reference images not found or already deleted: $imageError');
+        }
+
+        // 4. Delete associated place_embeddings
         print('Deleting place_embeddings for nodes: $nodeIds');
         await client
             .from('place_embeddings')
@@ -842,15 +885,15 @@ class SupabaseService {
             .inFilter('node_id', nodeIds);
         print('Deleted embeddings associated with the map\'s nodes.');
       } else {
-        print('No nodes found for map $mapId, skipping embedding deletion.');
+        print('No nodes found for map $mapId, skipping navigation paths, embeddings and image deletion.');
       }
 
-      // 3. Delete associated map_nodes
+      // 5. Delete associated map_nodes
       print('Deleting map_nodes for map: $mapId');
       await client.from('map_nodes').delete().eq('map_id', mapId);
       print('Deleted nodes associated with the map.');
 
-      // 4. Delete the map itself
+      // 6. Delete the map itself
       print('Deleting map entry: $mapId');
       await client.from('maps').delete().eq('id', mapId);
       print('Successfully deleted map: $mapId');
@@ -987,16 +1030,56 @@ class SupabaseService {
     }
   }
 
-  // NEW: Delete a map node and its associated embedding
+  // NEW: Delete a map node and its associated embedding and images
   Future<void> deleteMapNode(String nodeId) async {
     try {
-      // First, delete the associated embedding (if it exists)
+      // First, delete the associated reference image from storage bucket
+      final imageFileName = '${nodeId}_reference.jpg';
+      try {
+        await client.storage
+            .from('reference-images')
+            .remove([imageFileName]);
+        print('Deleted reference image: $imageFileName');
+      } catch (imageError) {
+        // Image might not exist, which is fine - continue with other deletions
+        print('Reference image not found or already deleted: $imageFileName ($imageError)');
+      }
+
+      // Second, find and delete navigation paths that reference this node
+      final navigationPathsResponse = await client
+          .from('navigation_paths')
+          .select('id')
+          .or('start_location_id.eq.$nodeId,end_location_id.eq.$nodeId');
+
+      final navigationPathIds = (navigationPathsResponse as List)
+          .map((path) => path['id'] as String)
+          .toList();
+
+      if (navigationPathIds.isNotEmpty) {
+        print('Found ${navigationPathIds.length} navigation paths referencing node $nodeId');
+
+        // Delete waypoints for these paths
+        await client
+            .from('path_waypoints')
+            .delete()
+            .inFilter('path_id', navigationPathIds);
+        print('Deleted waypoints for navigation paths: $navigationPathIds');
+
+        // Delete the navigation paths themselves
+        await client
+            .from('navigation_paths')
+            .delete()
+            .inFilter('id', navigationPathIds);
+        print('Deleted navigation paths: $navigationPathIds');
+      }
+
+      // Third, delete the associated embedding (if it exists)
       // Remove .maybeSingle() from the delete operation
       await client.from('place_embeddings').delete().eq('node_id', nodeId);
 
       print('Deleted embedding associated with node: $nodeId (if existed)');
 
-      // Then, delete the map node itself
+      // Finally, delete the map node itself
       // Ensure RLS allows this delete based on user_id or admin role
       await client.from('map_nodes').delete().eq('id', nodeId);
 
@@ -1658,8 +1741,8 @@ class SupabaseService {
         print('  Found ${(waypointsResponse as List).length} waypoints');
 
         // Debug: Print raw waypoint data to see exact structure
-        if ((waypointsResponse as List).isNotEmpty) {
-          final firstWaypoint = (waypointsResponse as List)[0];
+        if ((waypointsResponse).isNotEmpty) {
+          final firstWaypoint = (waypointsResponse)[0];
           print('  DEBUG - First waypoint raw data:');
           print(
               '    ID: ${firstWaypoint['id']} (type: ${firstWaypoint['id'].runtimeType})');
@@ -1671,7 +1754,7 @@ class SupabaseService {
 
         // Convert waypoints data to PathWaypoint objects
         final waypoints =
-            (waypointsResponse as List<dynamic>).map((waypointData) {
+            (waypointsResponse).map((waypointData) {
           // Handle embedding data - could be String, List, or null
           List<double> embedding = [];
           final embeddingData = waypointData['embedding'];
@@ -2265,7 +2348,7 @@ class SupabaseService {
   }
 
   // Create new organization
-  Future<Map<String, dynamic>> createOrganization(String name, String description) async {
+  Future<Map<String, dynamic>> createOrganization(String name, [String description = '']) async {
     try {
       // Verify admin permissions
       final isAdmin = await this.isAdmin();

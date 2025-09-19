@@ -71,7 +71,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reset Password'),
-        backgroundColor: Colors.blue.shade700,
+        backgroundColor: Colors.black,
         foregroundColor: Colors.white,
       ),
       body: SafeArea(
@@ -98,7 +98,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       Icon(
                         Icons.lock_reset,
                         size: iconSize,
-                        color: Colors.blue.shade700,
+                        color: Colors.black,
                       ),
                       SizedBox(height: spacing),
                       Text(

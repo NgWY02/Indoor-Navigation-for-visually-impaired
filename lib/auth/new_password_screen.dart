@@ -172,7 +172,7 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
         appBar: AppBar(
           title: const Text('Set New Password'),
           elevation: 0,
-          backgroundColor: Colors.blue.shade700,
+          backgroundColor: Colors.black,
           foregroundColor: Colors.white,
         ),
         body: SafeArea(

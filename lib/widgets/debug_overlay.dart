@@ -22,35 +22,35 @@ class DebugOverlay extends StatelessWidget {
     
     if (!isVisible) {
       return Positioned(
-        top: mediaQuery.padding.top + 10,
-        right: 10,
+        top: mediaQuery.padding.top + (isSmallScreen ? 50 : 60), // Lowered to match new debug overlay position
+        right: isSmallScreen ? 8 : 10,
         child: FloatingActionButton(
           mini: true,
           onPressed: onToggle,
-          backgroundColor: Colors.red.withOpacity(0.7),
+          backgroundColor: Colors.red.withValues(alpha: 0.5), // Even more transparent (was 0.7)
           child: const Icon(Icons.bug_report, color: Colors.white, size: 18),
         ),
       );
     }
 
     return Positioned(
-      top: mediaQuery.padding.top + (isSmallScreen ? 8 : 12),
-      left: isSmallScreen ? 6 : 8,
-      right: isSmallScreen ? 6 : 8,
+      top: mediaQuery.padding.top + (isSmallScreen ? 50 : 60), // Lowered down to avoid voice indicator overlap
+      left: isSmallScreen ? 4 : 6,
+      right: isSmallScreen ? 4 : 6,
       child: Container(
         constraints: BoxConstraints(
           maxHeight: screenHeight * (isSmallScreen ? 0.35 : 0.4), // Adaptive height
-          maxWidth: screenWidth - (isSmallScreen ? 12 : 16),
+          maxWidth: screenWidth - (isSmallScreen ? 8 : 12),
         ),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.9),
+          color: Colors.black.withValues(alpha: 0.6), // Even more transparent (was 0.9)
           borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 12),
-          border: Border.all(color: Colors.red.withOpacity(0.8), width: 1.5),
+          border: Border.all(color: Colors.red.withValues(alpha: 0.6), width: 1.5), // Also more transparent
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.4),
-              blurRadius: 10,
-              offset: const Offset(0, 3),
+              color: Colors.black.withValues(alpha: 0.3), // More transparent shadow (was 0.4)
+              blurRadius: 8, // Slightly reduced blur
+              offset: const Offset(0, 2), // Reduced offset
             ),
           ],
         ),
@@ -63,8 +63,8 @@ class DebugOverlay extends StatelessWidget {
                 horizontal: isSmallScreen ? 8 : 12, 
                 vertical: isSmallScreen ? 6 : 8,
               ),
-              decoration: const BoxDecoration(
-                color: Colors.red,
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.6), // More transparent header (was 0.8)
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(10),
                   topRight: Radius.circular(10),
@@ -90,11 +90,21 @@ class DebugOverlay extends StatelessWidget {
                   GestureDetector(
                     onTap: onToggle,
                     child: Container(
-                      padding: const EdgeInsets.all(4),
+                      width: isSmallScreen ? 32 : 36, // Larger touch target
+                      height: isSmallScreen ? 32 : 36, // Larger touch target
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.3), // More visible background
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.5),
+                          width: 1,
+                        ),
+                      ),
                       child: Icon(
-                        Icons.close, 
-                        color: Colors.white, 
-                        size: isSmallScreen ? 14 : 16,
+                        Icons.close,
+                        color: Colors.white,
+                        size: isSmallScreen ? 18 : 20, // Larger icon for better visibility
                       ),
                     ),
                   ),

@@ -1,5 +1,5 @@
-name: place_recognition_app
-description: A simple place recognition app
+name: indoor_navigation_app
+description: Indoor navigation system for visually impaired users
 
 publish_to: 'none'
 version: 1.0.0+1
@@ -10,31 +10,36 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+
+  # Core navigation functionality
   camera: ^0.11.1
-  tflite_flutter: ^0.11.0
-  image: ^4.2.0
-  path_provider: ^2.1.3
-  image_picker: ^1.1.2
-  supabase_flutter: ^2.10.0           
-  uuid: ^4.4.0                        
-  video_player: ^2.8.6                
-  video_thumbnail: ^0.5.3             
-  path: ^1.9.0                        
-  flutter_compass: ^0.8.0              
+  flutter_compass: ^0.8.0
   permission_handler: ^11.3.1
-  flutter_tts: ^4.0.2
-  pedometer: ^4.1.1
-  sensors_plus: ^6.1.1
-  collection: ^1.18.0
+  
+  # Media handling
+  video_player: ^2.8.6
+  video_thumbnail: ^0.5.3
+  image_picker: ^1.1.2
+  path_provider: ^2.1.3
+
+  # Backend integration
+  supabase_flutter: ^2.10.0
   flutter_dotenv: ^5.2.1
+
+  # Utilities
+  uuid: ^4.4.0
+  flutter_tts: ^4.0.2
   app_links: ^6.3.2
+  
+  # Voice Assistant
+  porcupine_flutter: ^3.0.5
+  speech_to_text: ^7.3.0
+  connectivity_plus: ^6.0.3
   http: ^1.2.2
   
 flutter:
   uses-material-design: true
   assets:
     - .env
-    - assets/models/                            # Include entire models directory
-    - assets/models/feature_extractor.tflite    # MobileNetV2 for place recognition
-    - assets/models/labels.txt                  # YOLO class labels
-    - assets/models/yolov8n.tflite              # YOLO model for object detection
+    - assets/wakeword.ppn
+    - assets/icon.png

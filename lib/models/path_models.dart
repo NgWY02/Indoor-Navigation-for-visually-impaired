@@ -9,7 +9,6 @@ enum TurnType {
   straight,
   left,
   right,
-  uTurn,
 }
 
 // Enum for landmark types
@@ -540,4 +539,4 @@ class TurnStatusResult {
       message: json['message'],
     );
   }
-} 
+}

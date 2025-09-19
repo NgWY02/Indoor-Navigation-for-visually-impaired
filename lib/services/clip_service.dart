@@ -5,16 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import '../models/path_models.dart';
 import 'supabase_service.dart';
+import 'gpt_service.dart';
 
 class ClipService {
-  static const String _defaultServerUrl = 'http://192.168.0.100:8000'; 
+  static const String _defaultServerUrl = 'http://172.16.38.229:8000'; 
   final String serverUrl;
   
-  // Performance optimization: Cache embeddings and reference images
-  static final Map<String, Map<String, List<double>>> _embeddingsCache = {};
+  // Performance optimization: Cache reference images
   static final Map<String, String> _referenceImageCache = {};
-  static DateTime? _embeddingsCacheTime;
-  static const Duration _cacheValidDuration = Duration(minutes: 5);
+  
+  // GPT service instance
+  final GPTService _gptService = GPTService();
   
   ClipService({this.serverUrl = _defaultServerUrl});
   
@@ -49,8 +50,8 @@ class ClipService {
   }
 
   /// Generate embeddings for navigation with inpainting (for real-time navigation accuracy)
-  Future<List<double>> generateNavigationEmbeddingInpainted(File imageFile) async {
-    return _generateEmbedding(imageFile, '/encode/inpainted');
+  Future<List<double>> generateNavigationEmbeddingInpainted(File imageFile, {bool disableYolo = false}) async {
+    return _generateEmbedding(imageFile, '/encode/inpainted', disableYolo: disableYolo);
   }
 
   /// Combined navigation method with inpainting: detect people + generate inpainted embedding + calculate threshold
@@ -59,12 +60,27 @@ class ClipService {
     required double cleanSceneThreshold,
     required double peoplePresentThreshold,
     required double crowdedSceneThreshold,
+    bool disableYolo = false,
   }) async {
     try {
-      // Run people detection and inpainted embedding generation in parallel for speed
+      if (disableYolo) {
+        // When YOLO is disabled, use regular navigation embedding (no inpainting needed)
+        debugPrint('ClipService: YOLO disabled - using regular navigation embedding');
+        final embedding = await generateNavigationEmbedding(imageFile);
+        
+        return NavigationEmbeddingResult(
+          embedding: embedding,
+          peopleDetected: false,
+          peopleCount: 0,
+          confidenceScores: [],
+          recommendedThreshold: cleanSceneThreshold, // Use clean scene threshold when YOLO disabled
+        );
+      }
+      
+      // When YOLO is enabled, run people detection and inpainted embedding generation in parallel
       final futures = await Future.wait([
-        detectPeople(imageFile),
-        generateNavigationEmbeddingInpainted(imageFile),
+        detectPeople(imageFile, disableYolo: false),
+        generateNavigationEmbeddingInpainted(imageFile, disableYolo: false),
       ]);
       
       final peopleResult = futures[0] as PeopleDetectionResult;
@@ -218,9 +234,18 @@ class ClipService {
   }
 
   /// Detect people in an image without full preprocessing
-  Future<PeopleDetectionResult> detectPeople(File imageFile) async {
+  Future<PeopleDetectionResult> detectPeople(File imageFile, {bool disableYolo = false}) async {
     try {
-      debugPrint('ClipService: Detecting people in ${imageFile.path}');
+      debugPrint('ClipService: Detecting people in ${imageFile.path} (YOLO ${disableYolo ? 'DISABLED' : 'ENABLED'})');
+      
+      // Return no people if YOLO is disabled
+      if (disableYolo) {
+        return PeopleDetectionResult(
+          peopleDetected: false,
+          peopleCount: 0,
+          confidenceScores: [],
+        );
+      }
       
       // Check if server is available
       if (!await isServerAvailable()) {
@@ -230,8 +255,11 @@ class ClipService {
       // Read original image bytes
       final originalBytes = await imageFile.readAsBytes();
       
-      // Prepare request
-      final request = http.MultipartRequest('POST', Uri.parse('$serverUrl/detect/people'));
+      // Prepare request with optional disableYolo parameter  
+      final uri = Uri.parse('$serverUrl/detect/people').replace(
+        queryParameters: disableYolo ? {'disable_yolo': 'true'} : {},
+      );
+      final request = http.MultipartRequest('POST', uri);
       request.files.add(http.MultipartFile.fromBytes('image', originalBytes, filename: 'image.jpg'));
       
       // Send request
@@ -266,7 +294,7 @@ class ClipService {
   }
 
   /// Internal method for embedding generation with different endpoints
-  Future<List<double>> _generateEmbedding(File imageFile, String endpoint) async {
+  Future<List<double>> _generateEmbedding(File imageFile, String endpoint, {bool disableYolo = false}) async {
     try {
       debugPrint('ClipService: Generating embedding for ${imageFile.path} via $endpoint');
       
@@ -278,8 +306,11 @@ class ClipService {
       // Read original image bytes (server will handle resize + preprocessing)
       final originalBytes = await imageFile.readAsBytes();
       
-      // Prepare request
-      final request = http.MultipartRequest('POST', Uri.parse('$serverUrl$endpoint'));
+      // Prepare request with optional disableYolo parameter
+      final uri = Uri.parse('$serverUrl$endpoint').replace(
+        queryParameters: disableYolo ? {'disable_yolo': 'true'} : {},
+      );
+      final request = http.MultipartRequest('POST', uri);
       request.files.add(http.MultipartFile.fromBytes('image', originalBytes, filename: 'image.jpg'));
       
       // Send request
@@ -350,9 +381,11 @@ class ClipService {
     required CameraController cameraController,
     required Function(String) onStatusUpdate,
     String? gptApiKey,
+    bool disableYolo = false,
   }) async {
     try {
       onStatusUpdate('Starting 8-second automated scan...');
+      debugPrint('🎯 Enhanced Localization: YOLO Detection ${disableYolo ? 'DISABLED' : 'ENABLED'}');
       
       final capturedFrames = <CapturedFrame>[];
       
@@ -367,8 +400,16 @@ class ClipService {
         final image = await cameraController.takePicture();
         final imageFile = File(image.path);
         
-        // Generate embedding for this frame
-        final embedding = await generateNavigationEmbedding(imageFile);
+        // Generate embedding for this frame with optional YOLO detection
+        final embedding = disableYolo
+          ? await generateNavigationEmbedding(imageFile)
+          : (await generateNavigationEmbeddingWithInpainting(
+              imageFile,
+              cleanSceneThreshold: 0.9,
+              peoplePresentThreshold: 0.75,
+              crowdedSceneThreshold: 0.7,
+              disableYolo: disableYolo,
+            )).embedding;
         
         capturedFrames.add(CapturedFrame(
           imageFile: imageFile,
@@ -404,34 +445,39 @@ class ClipService {
         
         return EnhancedLocalizationResult(
           success: false,
+          nodeId: null,
           errorMessage: 'No qualifying matches found (similarity > 0.8)',
           capturedFrameCount: capturedFrames.length,
           qualifiedFrameCount: 0,
         );
       }
       
-      onStatusUpdate('Found ${qualifiedFrames.length} qualified matches. Starting VLM verification...');
-      
-      // VLM verification for qualified frames
+      onStatusUpdate('Found ${qualifiedFrames.length} qualified matches. Starting batch VLM verification...');
+
+      // VLM verification for qualified frames (batch all at once)
       final verificationResults = <VLMVerificationResult>[];
-      
-      if (gptApiKey != null) {
-        for (int i = 0; i < qualifiedFrames.length; i++) {
-          final qualified = qualifiedFrames[i];
-          onStatusUpdate('VLM verification ${i + 1}/${qualifiedFrames.length}...');
-          
-          final vlmResult = await _performVLMVerification(
-            qualified.frame.imageFile,
-            qualified.referenceImageUrl,
-            gptApiKey,
-            qualified.bestMatch,
-          );
-          
-          verificationResults.add(vlmResult);
-          
-          // Small delay to avoid overwhelming the API
-          await Future.delayed(const Duration(milliseconds: 500));
-        }
+
+      if (gptApiKey != null && qualifiedFrames.isNotEmpty) {
+        onStatusUpdate('Batch VLM verification for ${qualifiedFrames.length} frames...');
+
+        // Prepare image pairs for batch verification
+        final imagePairs = qualifiedFrames.map((qualified) => {
+          'capturedImage': qualified.frame.imageFile,
+          'referenceImageUrl': qualified.referenceImageUrl,
+          'embeddingMatch': qualified.bestMatch,
+        }).toList();
+
+        // Perform batch VLM verification (single API call for all pairs)
+        final batchResults = await _gptService.performBatchVLMVerification(
+          imagePairs,
+          gptApiKey,
+        );
+
+        verificationResults.addAll(batchResults);
+
+        debugPrint('✅ Batch VLM verification completed: ${batchResults.length} results from 1 API call');
+
+        // Note: No delay needed since it's one API call instead of multiple
       }
       
       // Apply decision logic
@@ -452,6 +498,7 @@ class ClipService {
       debugPrint('Enhanced localization error: $e');
       return EnhancedLocalizationResult(
         success: false,
+        nodeId: null,
         errorMessage: 'Enhanced localization failed: $e',
         capturedFrameCount: 0,
         qualifiedFrameCount: 0,
@@ -469,32 +516,33 @@ class ClipService {
     final qualifiedFrames = <QualifiedFrame>[];
     
     try {
-      // Get all place embeddings from database (with caching)
-      final allEmbeddings = await _getCachedEmbeddings();
+      // Get all place embeddings with full info (node_id, place_name, etc.)
+      final allEmbeddingsInfo = await _getCachedEmbeddingsWithInfo();
       
       for (final frame in frames) {
         EmbeddingMatch? bestMatch;
         double bestSimilarity = 0.0;
         
         // Compare with all stored embeddings
-        allEmbeddings.forEach((placeName, storedVec) {
-          final similarity = calculateCosineSimilarity(frame.embedding, storedVec);
+        allEmbeddingsInfo.forEach((embeddingId, embeddingInfo) {
+          final similarity = calculateCosineSimilarity(frame.embedding, embeddingInfo.embedding);
           
           if (similarity > bestSimilarity) {
             bestSimilarity = similarity;
             bestMatch = EmbeddingMatch(
-              placeName: placeName,
+              placeName: embeddingInfo.placeName,
               similarity: similarity,
-              nodeId: null, // We'll need to get this separately or modify the getAllEmbeddings method
-              organizationId: null,
+              embeddingId: embeddingId, // Use embedding_id for precise reference image linking!
+              nodeId: embeddingInfo.nodeId,
+              organizationId: embeddingInfo.organizationId,
             );
           }
         });
         
         // Only include frames that meet the threshold
         if (bestMatch != null && bestSimilarity > threshold) {
-          // For now, use place name as reference image key (simplified approach)
-          final referenceImageUrl = await _getReferenceImageByPlaceName(bestMatch!.placeName);
+          // Use embedding_id for precise reference image linking (each embedding has its own reference image)
+          final referenceImageUrl = await _getReferenceImageByEmbeddingId(bestMatch!.embeddingId);
           
           qualifiedFrames.add(QualifiedFrame(
             frame: frame,
@@ -502,7 +550,7 @@ class ClipService {
             referenceImageUrl: referenceImageUrl,
           ));
           
-          debugPrint('Frame ${frame.frameIndex}: ${bestMatch!.placeName} (${bestSimilarity.toStringAsFixed(3)}) ✅');
+          debugPrint('Frame ${frame.frameIndex}: ${bestMatch!.placeName} (${bestSimilarity.toStringAsFixed(3)}) → Embedding: ${bestMatch!.embeddingId} ✅');
         } else {
           debugPrint('Frame ${frame.frameIndex}: Best similarity ${bestSimilarity.toStringAsFixed(3)} ❌ (< $threshold)');
         }
@@ -516,146 +564,97 @@ class ClipService {
     }
   }
   
-  /// Get cached embeddings with performance optimization
-  Future<Map<String, List<double>>> _getCachedEmbeddings() async {
-    final now = DateTime.now();
-    final cacheKey = 'all_embeddings';
-    
-    // Check if cache is valid
-    if (_embeddingsCacheTime != null && 
-        _embeddingsCache.containsKey(cacheKey) &&
-        now.difference(_embeddingsCacheTime!).compareTo(_cacheValidDuration) < 0) {
-      debugPrint('Using cached embeddings (${_embeddingsCache[cacheKey]!.length} entries)');
-      return _embeddingsCache[cacheKey]!;
-    }
-    
-    // Cache expired or doesn't exist, fetch from database
-    debugPrint('Fetching fresh embeddings from database...');
+  /// Get cached embeddings with performance optimization  
+  /// Returns map with node_id as key for better reference image linking
+  Future<Map<String, EmbeddingInfo>> _getCachedEmbeddingsWithInfo() async {
+    // For now, always fetch fresh data (caching can be added later if needed)
+    debugPrint('Fetching detailed embeddings from database...');
     final supabaseService = SupabaseService();
-    final allEmbeddings = await supabaseService.getAllEmbeddings();
     
-    // Update cache
-    _embeddingsCache[cacheKey] = allEmbeddings;
-    _embeddingsCacheTime = now;
-    
-    debugPrint('Cached ${allEmbeddings.length} embeddings for future use');
-    return allEmbeddings;
+    try {
+      // Get detailed embeddings with node_id and place_name
+      final response = await supabaseService.client
+          .from('place_embeddings')
+          .select('id, node_id, place_name, embedding, organization_id');
+      
+      final embeddingInfoMap = <String, EmbeddingInfo>{};
+      
+      for (final row in response) {
+        final embeddingId = row['id'] as String?;
+        final nodeId = row['node_id'] as String?; 
+        final placeName = row['place_name'] as String?;
+        final embeddingData = row['embedding'];
+        
+        if (embeddingId != null && nodeId != null && placeName != null && embeddingData != null) {
+          // Handle embedding data - it might be stored as JSON string or already as List
+          List<double> embedding;
+          try {
+            if (embeddingData is String) {
+              // Parse JSON string first, then convert to List<double>
+              final parsed = json.decode(embeddingData);
+              embedding = List<double>.from(parsed);
+            } else if (embeddingData is List) {
+              // Already a list, just convert to List<double>
+              embedding = List<double>.from(embeddingData);
+            } else {
+              debugPrint('⚠️ Unknown embedding data type: ${embeddingData.runtimeType}');
+              continue;
+            }
+            
+            embeddingInfoMap[embeddingId] = EmbeddingInfo(
+              embeddingId: embeddingId,
+              nodeId: nodeId,
+              placeName: placeName,
+              embedding: embedding,
+              organizationId: row['organization_id'] as String?,
+            );
+            
+            debugPrint('✅ Processed embedding $embeddingId: ${placeName} (${embedding.length}D)');
+            
+          } catch (e) {
+            debugPrint('❌ Error processing embedding for $embeddingId: $e');
+            continue;
+          }
+        }
+      }
+      
+      debugPrint('Fetched ${embeddingInfoMap.length} detailed embeddings');
+      return embeddingInfoMap;
+      
+    } catch (e) {
+      debugPrint('Error fetching detailed embeddings: $e');
+      return {};
+    }
   }
   
   
-  /// Get reference image URL by place name (simplified approach)
-  Future<String?> _getReferenceImageByPlaceName(String placeName) async {
-    // Use place name as cache key
-    if (_referenceImageCache.containsKey(placeName)) {
-      return _referenceImageCache[placeName];
+  /// Get reference image URL by embedding_id (precise 1:1 linking approach)
+  Future<String?> _getReferenceImageByEmbeddingId(String? embeddingId) async {
+    if (embeddingId == null) return null;
+    
+    // Use embedding_id as cache key
+    if (_referenceImageCache.containsKey(embeddingId)) {
+      return _referenceImageCache[embeddingId];
     }
     
     try {
       final supabaseService = SupabaseService();
-      // Try to get reference image using sanitized place name
-      final sanitizedName = placeName.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      // Use embedding_id directly for filename - this creates precise 1:1 linking
       final url = supabaseService.client.storage
           .from('reference-images')
-          .getPublicUrl('${sanitizedName}_reference.jpg');
+          .getPublicUrl('${embeddingId}_reference.jpg');
       
       // Cache the URL
-      _referenceImageCache[placeName] = url;
+      _referenceImageCache[embeddingId] = url;
       
+      debugPrint('✅ Found reference image for embedding $embeddingId');
       return url;
     } catch (e) {
-      debugPrint('Could not get reference image URL for place $placeName: $e');
+      debugPrint('❌ Could not get reference image URL for embedding $embeddingId: $e');
       return null;
     }
   }
   
-  /// Perform VLM verification using GPT-4-mini
-  Future<VLMVerificationResult> _performVLMVerification(
-    File capturedImage,
-    String? referenceImageUrl,
-    String apiKey,
-    EmbeddingMatch embeddingMatch,
-  ) async {
-    try {
-      if (referenceImageUrl == null) {
-        return VLMVerificationResult(
-          isMatch: false,
-          confidence: 0,
-          reasoning: 'No reference image available',
-          embeddingMatch: embeddingMatch,
-        );
-      }
-      
-      // Encode captured image to base64
-      final imageBytes = await capturedImage.readAsBytes();
-      final base64Image = base64Encode(imageBytes);
-      
-      // GPT-4-mini vision API call
-      final response = await http.post(
-        Uri.parse('https://api.openai.com/v1/chat/completions'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $apiKey',
-        },
-        body: json.encode({
-          'model': 'gpt-4o-mini',
-          'messages': [
-            {
-              'role': 'user',
-              'content': [
-                {
-                  'type': 'text',
-                  'text': 'Compare these two images and determine if they show the same location. '
-                      'Look at architectural features, objects, layout, and spatial relationships. '
-                      'Respond with JSON format: '
-                      '{"match": true/false, "confidence": 0-100, "reasoning": "brief explanation"}',
-                },
-                {
-                  'type': 'image_url',
-                  'image_url': {
-                    'url': 'data:image/jpeg;base64,$base64Image',
-                  },
-                },
-                {
-                  'type': 'image_url',
-                  'image_url': {
-                    'url': referenceImageUrl,
-                  },
-                },
-              ],
-            },
-          ],
-          'max_tokens': 300,
-          'temperature': 0.1,
-        }),
-      );
-      
-      if (response.statusCode == 200) {
-        final responseData = json.decode(response.body);
-        final content = responseData['choices'][0]['message']['content'];
-        
-        // Parse JSON response
-        final vlmData = json.decode(content);
-        
-        return VLMVerificationResult(
-          isMatch: vlmData['match'] ?? false,
-          confidence: (vlmData['confidence'] ?? 0).toDouble(),
-          reasoning: vlmData['reasoning'] ?? 'No reasoning provided',
-          embeddingMatch: embeddingMatch,
-        );
-      } else {
-        throw Exception('GPT API error: ${response.statusCode} - ${response.body}');
-      }
-      
-    } catch (e) {
-      debugPrint('VLM verification error: $e');
-      return VLMVerificationResult(
-        isMatch: false,
-        confidence: 0,
-        reasoning: 'VLM verification failed: $e',
-        embeddingMatch: embeddingMatch,
-      );
-    }
-  }
   
   /// Apply decision logic combining embedding similarity + VLM verification
   EnhancedLocalizationResult _applyDecisionLogic(
@@ -665,6 +664,7 @@ class ClipService {
     if (qualifiedFrames.isEmpty) {
       return EnhancedLocalizationResult(
         success: false,
+        nodeId: null,
         errorMessage: 'No qualified frames to process',
         capturedFrameCount: 0,
         qualifiedFrameCount: 0,
@@ -682,7 +682,7 @@ class ClipService {
         vlmResult = vlmResults[i];
         
         // Only include results where VLM confirms match with >70% confidence
-        if (vlmResult.isMatch && vlmResult.confidence > 70) {
+        if (vlmResult.isMatch && vlmResult.confidence > 80) {
           final combinedScore = _calculateCombinedScore(
             qualified.bestMatch.similarity,
             vlmResult.confidence / 100,
@@ -707,6 +707,7 @@ class ClipService {
     if (validResults.isEmpty) {
       return EnhancedLocalizationResult(
         success: false,
+        nodeId: null,
         errorMessage: 'No results passed VLM verification (>70% confidence)',
         capturedFrameCount: qualifiedFrames.length,
         qualifiedFrameCount: qualifiedFrames.length,
@@ -717,10 +718,25 @@ class ClipService {
     // Sort by combined score and pick the best
     validResults.sort((a, b) => b.combinedScore.compareTo(a.combinedScore));
     final bestResult = validResults.first;
-    
+
+    // Check minimum combined score threshold (e.g., 0.7 = 70%)
+    const double minCombinedScoreThreshold = 0.7; // Configurable threshold
+
+    if (bestResult.combinedScore < minCombinedScoreThreshold) {
+      return EnhancedLocalizationResult(
+        success: false,
+        nodeId: null,
+        errorMessage: 'Best match confidence too low: ${(bestResult.combinedScore * 100).toStringAsFixed(1)}% (minimum required: 70.0%)',
+        capturedFrameCount: qualifiedFrames.length + (qualifiedFrames.length > 8 ? 0 : 8 - qualifiedFrames.length),
+        qualifiedFrameCount: qualifiedFrames.length,
+        vlmVerificationCount: vlmResults.length,
+      );
+    }
+
     return EnhancedLocalizationResult(
       success: true,
       detectedLocation: bestResult.qualified.bestMatch.placeName,
+      nodeId: bestResult.qualified.bestMatch.nodeId,
       confidence: bestResult.combinedScore,
       embeddingSimilarity: bestResult.qualified.bestMatch.similarity,
       vlmConfidence: bestResult.vlmResult?.confidence,
@@ -777,9 +793,7 @@ class ClipService {
   
   /// Clear performance caches (call when needed to free memory)
   static void clearCaches() {
-    _embeddingsCache.clear();
     _referenceImageCache.clear();
-    _embeddingsCacheTime = null;
     debugPrint('ClipService: Cleared all caches');
   }
 
@@ -878,12 +892,14 @@ class CapturedFrame {
 class EmbeddingMatch {
   final String placeName;
   final double similarity;
+  final String? embeddingId; // Primary key for reference image linking
   final String? nodeId;
   final String? organizationId;
   
   EmbeddingMatch({
     required this.placeName,
     required this.similarity,
+    this.embeddingId,
     this.nodeId,
     this.organizationId,
   });
@@ -901,19 +917,6 @@ class QualifiedFrame {
   });
 }
 
-class VLMVerificationResult {
-  final bool isMatch;
-  final double confidence;
-  final String reasoning;
-  final EmbeddingMatch embeddingMatch;
-  
-  VLMVerificationResult({
-    required this.isMatch,
-    required this.confidence,
-    required this.reasoning,
-    required this.embeddingMatch,
-  });
-}
 
 class CombinedResult {
   final QualifiedFrame qualified;
@@ -937,9 +940,26 @@ class AlternativeLocation {
   });
 }
 
+class EmbeddingInfo {
+  final String embeddingId; // Primary key
+  final String nodeId;
+  final String placeName;
+  final List<double> embedding;
+  final String? organizationId;
+  
+  EmbeddingInfo({
+    required this.embeddingId,
+    required this.nodeId,
+    required this.placeName,
+    required this.embedding,
+    this.organizationId,
+  });
+}
+
 class EnhancedLocalizationResult {
   final bool success;
   final String? detectedLocation;
+  final String? nodeId; // Actual database node ID for route matching
   final double? confidence;
   final double? embeddingSimilarity;
   final double? vlmConfidence;
@@ -953,6 +973,7 @@ class EnhancedLocalizationResult {
   EnhancedLocalizationResult({
     required this.success,
     this.detectedLocation,
+    this.nodeId,
     this.confidence,
     this.embeddingSimilarity,
     this.vlmConfidence,

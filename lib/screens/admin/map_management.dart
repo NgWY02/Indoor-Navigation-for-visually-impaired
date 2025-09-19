@@ -240,34 +240,36 @@ class _MapManagementState extends State<MapManagement> {
   
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
-    final isSmallScreen = screenSize.width < 360;
-    final isLargeScreen = screenSize.width > 480;
-    final horizontalPadding = isSmallScreen ? 12.0 : isLargeScreen ? 24.0 : 16.0;
-    final verticalPadding = isSmallScreen ? 8.0 : 16.0;
+    final mediaQuery = MediaQuery.of(context);
+    final screenHeight = mediaQuery.size.height;
+
+    // Phone-optimized sizing with small phone adjustments
+    final bool isSmallPhone = screenHeight < 600;
+    final double buttonHeight = isSmallPhone ? 92.0 : 96.0;
+    final double iconSize = 40.0;
+    final double titleFontSize = isSmallPhone ? 18.0 : 20.0;
+    final double subtitleFontSize = isSmallPhone ? 12.0 : 14.0;
+    final double padding = 24.0;
 
     return Scaffold(
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Theme.of(context).primaryColor,
-        foregroundColor: Colors.white,
-        title: Text(
-          'Map Management',
-          style: TextStyle(
-            fontSize: isSmallScreen ? 18 : 20,
-          ),
+        title: Semantics(
+          label: 'Map management screen',
+          child: Text('Map Management'),
         ),
+        backgroundColor: Colors.black,
+        elevation: 0,
+        foregroundColor: Colors.white,
       ),
       body: SafeArea(
         child: _isLoading
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
-                padding: EdgeInsets.symmetric(
-                  horizontal: horizontalPadding,
-                  vertical: verticalPadding,
-                ),
+                padding: EdgeInsets.all(padding),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: _buildMainContent(isSmallScreen, isLargeScreen),
+                  children: _buildMainContent(buttonHeight, iconSize, titleFontSize, subtitleFontSize, isSmallPhone),
                 ),
               ),
       ),
@@ -276,106 +278,143 @@ class _MapManagementState extends State<MapManagement> {
 
 
 
-  List<Widget> _buildMainContent(bool isSmallScreen, bool isLargeScreen) {
+  List<Widget> _buildMainContent(double buttonHeight, double iconSize, double titleFontSize, double subtitleFontSize, bool isSmallPhone) {
     return [
       // Error message (show only when not adding)
       if (_errorMessage != null && !_isAddingMap)
-        Container(
-          padding: const EdgeInsets.all(12),
-          margin: const EdgeInsets.only(bottom: 16),
-          decoration: BoxDecoration(
-            color: Colors.red.shade100,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.red.shade300),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.error_outline, color: Colors.red.shade700),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _errorMessage!,
-                  style: TextStyle(color: Colors.red.shade900),
+        Semantics(
+          label: 'Error message',
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            margin: const EdgeInsets.only(bottom: 24),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.red.shade600, width: 2),
+            ),
+            child: Row(
+              children: [
+                Semantics(
+                  label: 'Error icon',
+                  child: Icon(
+                    Icons.error_outline,
+                    color: Colors.red.shade600,
+                    size: 24,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: Colors.red.shade800,
+                      fontSize: subtitleFontSize,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
 
-      // Available maps section Title + Button Row
+      // Available maps section header with action button
       Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            'Available Maps',
-            style: TextStyle(
-              fontSize: isSmallScreen ? 18.0 : 20.0,
-              fontWeight: FontWeight.bold,
+          Semantics(
+            label: 'Available maps section',
+            child: Text(
+              'Available Maps',
+              style: TextStyle(
+                fontSize: titleFontSize + 2,
+                fontWeight: FontWeight.bold,
+                color: Colors.black,
+              ),
             ),
           ),
           if (!_isAddingMap)
-            ElevatedButton.icon(
-              icon: Icon(Icons.add_photo_alternate_outlined, size: isSmallScreen ? 16 : 18),
-              label: Text(isSmallScreen ? 'Add Map' : 'Upload New Map'),
-              onPressed: () {
-                setState(() {
-                  _isAddingMap = true;
-                  _errorMessage = null;
-                });
-              },
-              style: ElevatedButton.styleFrom(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isSmallScreen ? 12.0 : 16.0,
-                  vertical: isSmallScreen ? 10.0 : 12.0,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+            Semantics(
+              label: 'Upload new map button',
+              hint: 'Opens form to upload a new map',
+              button: true,
+              child: SizedBox(
+                height: 40,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    setState(() {
+                      _isAddingMap = true;
+                      _errorMessage = null;
+                    });
+                  },
+                  icon: Icon(Icons.add_photo_alternate, size: 18),
+                  label: Text(
+                    'Upload Map',
+                    style: TextStyle(fontSize: subtitleFontSize - 2),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade600,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    elevation: 2,
+                  ),
                 ),
               ),
             ),
         ],
       ),
-      const SizedBox(height: 16.0),
+
+      const SizedBox(height: 16),
 
       // Conditionally Display Map List OR Add Form
       if (!_isAddingMap)
-        ..._buildMapsList(isSmallScreen, isLargeScreen)
+        ..._buildMapsList(buttonHeight, iconSize, titleFontSize, subtitleFontSize, isSmallPhone)
       else
-        _buildAddMapForm(isSmallScreen, isLargeScreen),
+        _buildAddMapForm(buttonHeight, iconSize, titleFontSize, subtitleFontSize, isSmallPhone),
     ];
   }
 
-  List<Widget> _buildMapsList(bool isSmallScreen, bool isLargeScreen) {
+  List<Widget> _buildMapsList(double buttonHeight, double iconSize, double titleFontSize, double subtitleFontSize, bool isSmallPhone) {
     if (_maps.isEmpty) {
       return [
-        Center(
-          child: Container(
-            padding: const EdgeInsets.all(32.0),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.map_outlined,
-                  size: isSmallScreen ? 48 : 64,
-                  color: Colors.grey[400],
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  'No maps available',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 16 : 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
+        Semantics(
+          label: 'No maps available',
+          child: Center(
+            child: Container(
+              padding: EdgeInsets.all(isSmallPhone ? 40 : 48),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Semantics(
+                    label: 'Empty maps icon',
+                    child: Icon(
+                      Icons.map_outlined,
+                      size: 64,
+                      color: Colors.grey.shade400,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Add your first map to get started!',
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 12 : 14,
-                    color: Colors.grey,
+                  const SizedBox(height: 24),
+                  Text(
+                    'No maps available',
+                    style: TextStyle(
+                      fontSize: titleFontSize,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey.shade600,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  Text(
+                    'Add your first map to get started!',
+                    style: TextStyle(
+                      fontSize: subtitleFontSize,
+                      color: Colors.grey.shade500,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -391,23 +430,28 @@ class _MapManagementState extends State<MapManagement> {
           final map = _maps[index];
           final bool isSelected = _selectedMap != null && _selectedMap!['id'] == map['id'];
 
-          return Card(
-            margin: const EdgeInsets.symmetric(vertical: 8.0),
-            elevation: isSelected ? 4 : 2,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12.0),
-              side: isSelected
-                  ? BorderSide(color: Theme.of(context).primaryColor, width: 2)
-                  : BorderSide.none,
-            ),
-            child: InkWell(
-              onTap: () => _selectMap(map),
-              borderRadius: BorderRadius.circular(12.0),
-              child: Padding(
-                padding: EdgeInsets.all(isSmallScreen ? 12.0 : 16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+          return Semantics(
+            label: '${map['name'] ?? 'Unnamed Map'} - ${map['node_count'] ?? 0} nodes${isSelected ? ', selected' : ''}',
+            hint: 'Double tap to ${isSelected ? 'deselect' : 'select'} this map',
+            button: true,
+            selected: isSelected,
+            child: Card(
+              margin: const EdgeInsets.symmetric(vertical: 8.0),
+              elevation: isSelected ? 4 : 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12.0),
+                side: isSelected
+                    ? BorderSide(color: Colors.blue.shade600, width: 2)
+                    : BorderSide.none,
+              ),
+              child: InkWell(
+                onTap: () => _selectMap(map),
+                borderRadius: BorderRadius.circular(12.0),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                     Row(
                       children: [
                         Expanded(
@@ -415,7 +459,8 @@ class _MapManagementState extends State<MapManagement> {
                             map['name'] ?? 'Unnamed Map',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              fontSize: isSmallScreen ? 16 : 18,
+                              fontSize: titleFontSize,
+                              color: Colors.black,
                             ),
                           ),
                         ),
@@ -429,11 +474,11 @@ class _MapManagementState extends State<MapManagement> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        Icon(Icons.location_on, size: isSmallScreen ? 14 : 16, color: Colors.grey[600]),
+                        Icon(Icons.location_on, size: 16, color: Colors.grey.shade600),
                         const SizedBox(width: 4),
                         Text(
                           '${map['node_count'] ?? 0} nodes',
-                          style: TextStyle(color: Colors.grey[600], fontSize: isSmallScreen ? 12 : 14),
+                          style: TextStyle(color: Colors.grey.shade600, fontSize: subtitleFontSize),
                         ),
                       ],
                     ),
@@ -518,21 +563,21 @@ class _MapManagementState extends State<MapManagement> {
                 ),
               ),
             ),
+            ),
           );
         },
       ),
-      const SizedBox(height: 24.0),
     ];
   }
 
-  Widget _buildAddMapForm(bool isSmallScreen, bool isLargeScreen) {
+  Widget _buildAddMapForm(double buttonHeight, double iconSize, double titleFontSize, double subtitleFontSize, bool isSmallPhone) {
     return Card(
       elevation: 4,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding: EdgeInsets.all(isSmallScreen ? 16.0 : 20.0),
+        padding: const EdgeInsets.all(20.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -542,7 +587,7 @@ class _MapManagementState extends State<MapManagement> {
                 Text(
                   'Add New Map',
                   style: TextStyle(
-                    fontSize: isSmallScreen ? 18.0 : 20.0,
+                    fontSize: titleFontSize,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -557,8 +602,8 @@ class _MapManagementState extends State<MapManagement> {
                 ),
               ],
             ),
-            SizedBox(height: isSmallScreen ? 16.0 : 20.0),
-            
+            const SizedBox(height: 20.0),
+
             // Form error message
             if (_errorMessage != null)
               Container(
@@ -576,7 +621,7 @@ class _MapManagementState extends State<MapManagement> {
                     Expanded(
                       child: Text(
                         _errorMessage!,
-                        style: TextStyle(color: Colors.red.shade900, fontSize: isSmallScreen ? 12 : 14),
+                        style: TextStyle(color: Colors.red.shade900, fontSize: subtitleFontSize),
                       ),
                     ),
                   ],
@@ -592,15 +637,15 @@ class _MapManagementState extends State<MapManagement> {
                 ),
                 hintText: 'e.g., 1st Floor, Building A',
                 prefixIcon: const Icon(Icons.map),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: isSmallScreen ? 12 : 16,
-                  vertical: isSmallScreen ? 12 : 16,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
                 ),
               ),
             ),
-            SizedBox(height: isSmallScreen ? 16.0 : 20.0),
-            
-            // Responsive image display for phones
+            const SizedBox(height: 20.0),
+
+            // Image display for phones
             Center(
               child: _mapImage != null
                   ? Stack(
@@ -608,7 +653,7 @@ class _MapManagementState extends State<MapManagement> {
                       children: [
                         Container(
                           constraints: BoxConstraints(
-                            maxHeight: isSmallScreen ? 200.0 : isLargeScreen ? 350.0 : 280.0,
+                            maxHeight: 280.0,
                             maxWidth: MediaQuery.of(context).size.width - 32,
                           ),
                           decoration: BoxDecoration(
@@ -644,7 +689,7 @@ class _MapManagementState extends State<MapManagement> {
                       ],
                     )
                   : Container(
-                      height: isSmallScreen ? 150 : 200,
+                      height: 200.0,
                       width: double.infinity,
                       decoration: BoxDecoration(
                         border: Border.all(
@@ -663,14 +708,14 @@ class _MapManagementState extends State<MapManagement> {
                           children: [
                             Icon(
                               Icons.upload_file,
-                              size: isSmallScreen ? 48 : 64,
+                              size: 64.0,
                               color: Colors.grey[600],
                             ),
                             const SizedBox(height: 12),
                             Text(
                               'Select Map Image',
                               style: TextStyle(
-                                fontSize: isSmallScreen ? 14 : 16,
+                                fontSize: subtitleFontSize,
                                 fontWeight: FontWeight.w500,
                                 color: Colors.grey[700],
                               ),
@@ -679,7 +724,7 @@ class _MapManagementState extends State<MapManagement> {
                             Text(
                               'Tap to browse files',
                               style: TextStyle(
-                                fontSize: isSmallScreen ? 12 : 14,
+                                fontSize: subtitleFontSize - 2,
                                 color: Colors.grey[500],
                               ),
                             ),
@@ -695,7 +740,7 @@ class _MapManagementState extends State<MapManagement> {
               child: ElevatedButton(
                 onPressed: _isLoading ? null : (_mapImage != null ? _saveMap : _pickImage),
                 style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: isSmallScreen ? 14.0 : 16.0),
+                  padding: const EdgeInsets.symmetric(vertical: 16.0),
                   backgroundColor: Theme.of(context).primaryColor,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
@@ -705,8 +750,8 @@ class _MapManagementState extends State<MapManagement> {
                 ),
                 child: _isLoading
                     ? SizedBox(
-                        height: isSmallScreen ? 18 : 20,
-                        width: isSmallScreen ? 18 : 20,
+                        height: 20.0,
+                        width: 20.0,
                         child: const CircularProgressIndicator(
                           strokeWidth: 3,
                           color: Colors.white,
@@ -715,13 +760,85 @@ class _MapManagementState extends State<MapManagement> {
                     : Text(
                         _mapImage != null ? 'Save Map' : 'Select Map Image',
                         style: TextStyle(
-                          fontSize: isSmallScreen ? 14 : 16,
+                          fontSize: subtitleFontSize,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAccessibleButton({
+    required BuildContext context,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color backgroundColor,
+    required VoidCallback onTap,
+    required double buttonHeight,
+    required double iconSize,
+    required double titleFontSize,
+    required double subtitleFontSize,
+  }) {
+    return Container(
+      height: buttonHeight,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.black, width: 2),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+            child: Row(
+              children: [
+                Icon(
+                  icon,
+                  color: Colors.white,
+                  size: iconSize,
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: titleFontSize,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: subtitleFontSize,
+                          color: Colors.white.withOpacity(0.9),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward,
+                  color: Colors.white,
+                  size: 28,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

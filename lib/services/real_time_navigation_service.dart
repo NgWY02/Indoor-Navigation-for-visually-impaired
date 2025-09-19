@@ -3,9 +3,9 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:pedometer/pedometer.dart';
 import '../services/clip_service.dart';
 import '../services/position_localization_service.dart';
+import '../services/supabase_service.dart';
 import '../models/path_models.dart';
 
 enum NavigationState {
@@ -15,12 +15,16 @@ enum NavigationState {
   approachingWaypoint,
   reorientingUser,
   destinationReached,
-  offTrack,
+  awaitingManualCapture,
+  manualCaptureInProgress,
+  analyzingCapturedFrames,
+  recoveryFailed,
 }
 
 class RealTimeNavigationService {
   final ClipService _clipService;
   final FlutterTts _tts;
+  final SupabaseService _supabaseService = SupabaseService();
   
   // Navigation state
   NavigationRoute? _currentRoute;
@@ -30,33 +34,37 @@ class RealTimeNavigationService {
   Timer? _navigationTimer;
   StreamSubscription<CompassEvent>? _compassSubscription;
   
-  // STEP COUNTER SOLUTION: Movement validation with REAL distances
-  StreamSubscription<StepCount>? _stepCountSubscription;
-  StreamSubscription<PedestrianStatus>? _pedestrianStatusSubscription;
-  // Note: Now uses real step-based distances from path recording
   
   // Tracking
   double? _currentHeading;
   List<double>? _lastCapturedEmbedding;
   DateTime _lastGuidanceTime = DateTime.now();
+  DateTime? _lastVisualMatchTime; // Track when we last had a visual match
+  
+  // YOLO toggle state
+  bool _disableYolo = false;
   
   // Configuration - ALL threshold constants are centralized HERE
   // To change any threshold value, modify these constants only
-  static const double _waypointReachedThresholdDefault = 0.85;  // Main navigation threshold
-  static const double _offTrackThreshold = 0.4;
-  static const double _cleanSceneThreshold = 0.85;  // For clean-to-clean comparisons
+  static const double _waypointReachedThresholdDefault = 0.87;  // Main navigation threshold
+  static const double _cleanSceneThreshold = 0.87;  // For clean-to-clean comparisons
   static const double _peoplePresentThreshold = 0.75;  // For scenes with people
   static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
-  static const double _turnWaypointThreshold = 0.92;  // Higher threshold for turn waypoints (left/right/U-turn)
+  static const double _turnWaypointThreshold = 0.9;  // Higher threshold for turn waypoints (left/right/U-turn)
   static const Duration _guidanceInterval = Duration(seconds: 1);
   static const Duration _repositioningTimeout = Duration(seconds: 10);  // Dynamic threshold and audio management
-  double _currentWaypointThreshold = 0.88;
+  double _currentWaypointThreshold = 0.87;
   String? _lastSpokenInstruction;
   DateTime? _lastInstructionTime;
   
-  // Off-track management for VIP users
-  int _consecutiveOffTrackCount = 0;
-  static const int _offTrackThreshold3Times = 3;
+  // Waypoint recovery system
+  int _consecutiveWaypointFailures = 0;
+  static const int _waypointFailureThreshold = 30;
+  static const double _recoveryThreshold = 0.76;
+  int _manualCaptureCount = 0;
+  List<File> _capturedRecoveryFrames = [];
+  int _recoveryAttempts = 0;
+  static const int _maxRecoveryAttempts = 3;
   
   // Callbacks
   final Function(NavigationState state)? onStateChanged;
@@ -64,6 +72,8 @@ class RealTimeNavigationService {
   final Function(NavigationInstruction instruction)? onInstructionUpdate;
   final Function(String error)? onError;
   final Function(String debugInfo)? onDebugUpdate;
+  final Function()? onRequestManualCapture;
+  final Function(File imageFile)? onManualFrameCaptured;
 
   RealTimeNavigationService({
     required ClipService clipService,
@@ -72,22 +82,28 @@ class RealTimeNavigationService {
     this.onInstructionUpdate,
     this.onError,
     this.onDebugUpdate,
+    this.onRequestManualCapture,
+    this.onManualFrameCaptured,
   }) : _clipService = clipService, _tts = FlutterTts() {
     _initializeTTS();
-    // TEMPORARILY DISABLED: Step counter for testing
-    // _initializeStepCounter();
   }
 
   // Public getters
   NavigationState get state => _state;
   NavigationRoute? get currentRoute => _currentRoute;
   int get currentWaypointIndex => _currentWaypointIndex;
-  double get progressPercentage => _currentRoute != null 
-      ? ((_currentWaypointIndex + 1) / _currentRoute!.waypoints.length) * 100 
+  double get progressPercentage => _currentRoute != null
+      ? ((_currentSequenceNumber + 1) / _currentRoute!.waypoints.length) * 100
       : 0.0;
   
   /// Get the current compass heading (null if not available)
   double? get currentHeading => _currentHeading;
+  
+  /// Set whether YOLO detection should be disabled
+  void setDisableYolo(bool disable) {
+    _disableYolo = disable;
+    print('🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}');
+  }
   
   /// Get the target heading for initial orientation (null if not in orientation phase)
   double? get targetHeading {
@@ -124,10 +140,15 @@ class RealTimeNavigationService {
       // Reset audio tracking for new navigation session
       _lastSpokenInstruction = null;
       _lastInstructionTime = null;
+      _lastVisualMatchTime = null; // Reset visual match tracking
       _currentWaypointThreshold = _waypointReachedThresholdDefault;
       
-      // Reset off-track counter for new navigation session
-      _consecutiveOffTrackCount = 0;
+      // Reset all failure counters for new navigation session
+      _consecutiveWaypointFailures = 0;
+      _recoveryAttempts = 0;
+      
+      // Clean up any leftover recovery data
+      await _cleanupRecoveryFrames();
       
       // START WITH INITIAL ORIENTATION instead of direct navigation
       _setState(NavigationState.initialOrientation);
@@ -142,7 +163,7 @@ class RealTimeNavigationService {
       // 🐛 Send navigation start info to screen
       
       onStatusUpdate?.call('Starting navigation to ${route.endNodeName}');
-      await _speak('Navigation started. Let me help you face the right direction first.');
+      await _speak('Navigation started. Face the right direction.');
       
       // Initialize compass
       await _initializeCompass();
@@ -156,14 +177,12 @@ class RealTimeNavigationService {
   }
 
   /// Stop navigation
-  Future<void> stopNavigation() async {
+  Future<void> stopNavigation({bool silent = false}) async {
     _navigationTimer?.cancel();
     _compassSubscription?.cancel();
-    _stepCountSubscription?.cancel();
-    _pedestrianStatusSubscription?.cancel();
     
-    if (_currentRoute != null) {
-      await _speak('Navigation stopped');
+    if (_currentRoute != null && !silent) {
+      await _speak('Navigation stopped.');
     }
     
     _currentRoute = null;
@@ -173,10 +192,15 @@ class RealTimeNavigationService {
     // Reset audio tracking and people detection state
     _lastSpokenInstruction = null;
     _lastInstructionTime = null;
+    _lastVisualMatchTime = null;
     _currentWaypointThreshold = _waypointReachedThresholdDefault;
     
-    // Reset off-track counter
-    _consecutiveOffTrackCount = 0;
+    // Reset all failure counters
+    _consecutiveWaypointFailures = 0;
+    _recoveryAttempts = 0;
+    
+    // Clean up recovery data
+    await _cleanupRecoveryFrames();
     
     _setState(NavigationState.idle);
     
@@ -201,10 +225,21 @@ class RealTimeNavigationService {
     print('🎯 Target heading for first waypoint: ${firstWaypoint.heading.toStringAsFixed(1)}°');
     
     _updateDebugDisplay('🧭 INITIAL ORIENTATION\n🎯 Target: ${firstWaypoint.heading.toStringAsFixed(1)}°\n⏳ Waiting for your compass reading...');
-    
-    await _speak('Please turn slowly until I tell you to stop. I will guide you to face the right direction.');
+
+    // Audio feedback for orientation start
+    await _speak('Starting orientation. Please face the correct direction for navigation.');
+    onStatusUpdate?.call('Starting orientation - face the correct direction');
+
+    await _speak('Starting Orientation.Turn slowly until I say stop.');
     onStatusUpdate?.call('Turn slowly - finding correct direction');
-    
+
+    // Update debug display to show waiting period
+    _updateDebugDisplay('🧭 GETTING READY\n⏳ Please wait while I prepare orientation...\n🎯 Keep your phone steady');
+    onStatusUpdate?.call('Preparing orientation system...');
+
+    // Wait a few seconds for user to process the initial instructions before starting orientation checking
+    await Future.delayed(Duration(seconds: 3));
+
     // Start periodic orientation checking
     _navigationTimer = Timer.periodic(Duration(seconds: 1), (_) => _checkOrientation());
   }
@@ -355,8 +390,11 @@ class RealTimeNavigationService {
     _navigationTimer?.cancel(); // Stop orientation timer
     
     // First, tell the user they're correctly oriented and wait
-    await _speak('Perfect! You are facing the right direction.');
+    await _speak('Perfect! You are now facing the correct direction.');
     onStatusUpdate?.call('Direction confirmed - preparing navigation');
+
+    await _speak('Navigation will begin shortly. Keep facing this direction.');
+    onStatusUpdate?.call('Preparing navigation...');
     
     print('✅ User is correctly oriented - confirming before navigation');
     _updateDebugDisplay('✅ ORIENTATION COMPLETE\n⏳ Preparing navigation...\n� Getting ready to start...');
@@ -365,17 +403,34 @@ class RealTimeNavigationService {
     Timer(Duration(seconds: 2), () async {
       _setState(NavigationState.navigating);
       
-      await _speak('Starting navigation now.');
+      await _speak('Starting navigation.');
       onStatusUpdate?.call('Navigation started');
       
       print('🚀 Starting actual navigation after orientation confirmation');
-      _updateDebugDisplay('�🚀 NAVIGATION STARTED\n📍 Moving to waypoint guidance...');
+      _updateDebugDisplay('''
+🚀 NAVIGATION STARTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📍 Orientation complete - ready for waypoint guidance
+🎯 Waiting for first visual match with waypoint 0
+⏳ Camera processing will provide turn-by-turn guidance
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+''');
       
-      // Give initial navigation instruction
-      await _updateNavigationInstruction();
-      
+      // Reset guidance time to prevent immediate guidance
+      _lastGuidanceTime = DateTime.now();
+
+      // DON'T provide waypoint instruction during orientation
+      // Wait for first visual match before providing navigation guidance
+      // Only compass guidance should be given during orientation phase
+
       // Start periodic navigation guidance
       _navigationTimer = Timer.periodic(_guidanceInterval, (_) => _checkProgress());
+
+      // Provide initial guidance for the first waypoint
+      final firstWaypoint = _getWaypointBySequence(0);
+      if (firstWaypoint != null) {
+        await _provideGuidance(firstWaypoint, 0.5);
+      }
     });
   }
 
@@ -391,7 +446,7 @@ class RealTimeNavigationService {
     
     print('⏩ User chose to skip orientation - starting navigation directly');
     await _speak('Skipping orientation. Starting navigation.');
-    
+
     await _orientationComplete();
   }
 
@@ -414,22 +469,28 @@ class RealTimeNavigationService {
         cleanSceneThreshold: _cleanSceneThreshold,
         peoplePresentThreshold: _peoplePresentThreshold,
         crowdedSceneThreshold: _crowdedSceneThreshold,
+        disableYolo: _disableYolo,
       );
       _lastCapturedEmbedding = navigationResult.embedding;
       
       // HALLWAY FIX: Use higher threshold for waypoints BEFORE turns to prevent premature turn instructions
+      // Also use higher threshold for final waypoint to ensure accurate destination reaching
       final nextWaypoint = _getWaypointBySequence(_currentSequenceNumber + 1);
       final isBeforeTurnWaypoint = nextWaypoint != null &&
                                  (nextWaypoint.turnType == TurnType.left ||
-                                  nextWaypoint.turnType == TurnType.right ||
-                                  nextWaypoint.turnType == TurnType.uTurn);
+                                  nextWaypoint.turnType == TurnType.right);
+      final isFinalWaypoint = nextWaypoint == null; // No next waypoint means this is the final one
 
-      _currentWaypointThreshold = isBeforeTurnWaypoint ? _turnWaypointThreshold : navigationResult.recommendedThreshold;
+      _currentWaypointThreshold = (isBeforeTurnWaypoint || isFinalWaypoint) ? _turnWaypointThreshold : navigationResult.recommendedThreshold;
       
       print('🎯 Navigation frame: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
-      print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} (${isBeforeTurnWaypoint ? 'BEFORE TURN (0.92)' : 'NORMAL (' + navigationResult.recommendedThreshold.toStringAsFixed(2) + ')'})');
+      String thresholdReason = isFinalWaypoint ? 'FINAL WAYPOINT (0.9)' :
+                              isBeforeTurnWaypoint ? 'BEFORE TURN (0.9)' :
+                              'NORMAL (' + navigationResult.recommendedThreshold.toStringAsFixed(2) + ')';
+      print('🎯 Dynamic threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} ($thresholdReason)');
+      print('🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}');
       print('👥 People detected: ${navigationResult.peopleDetected ? 'YES (${navigationResult.peopleCount})' : 'NO'}');
-      print('🎨 Inpainting: ${navigationResult.peopleDetected ? 'Applied (people + carried objects removed)' : 'Skipped (no people detected)'}');
+      print('🎨 Inpainting: ${_disableYolo ? 'DISABLED BY USER' : navigationResult.peopleDetected ? 'Applied (people + carried objects removed)' : 'Skipped (no people detected)'}');
       
       // Calculate similarity with target waypoint
       final similarity = _calculateCosineSimilarity(navigationResult.embedding, targetWaypoint.embedding);
@@ -437,9 +498,7 @@ class RealTimeNavigationService {
       
       // STEP COUNTER SOLUTION: Multi-condition waypoint validation
       final hasVisualMatch = similarity >= _currentWaypointThreshold;
-      // TEMPORARILY DISABLED: Step validation for testing
-      // final hasSufficientSteps = _hasWalkedSufficientSteps(targetWaypoint);
-      final hasSufficientSteps = true; // Always true for testing
+      final hasSufficientSteps = true; // Visual-only navigation mode
       
       print('🔍 Waypoint validation for sequence $_currentSequenceNumber:');
       print('   👁️ Visual match (≥${_currentWaypointThreshold.toStringAsFixed(2)}): $hasVisualMatch (${similarity.toStringAsFixed(3)})');
@@ -452,11 +511,12 @@ class RealTimeNavigationService {
           🔍 WAYPOINT MATCHING:
           ━━━━━━━━━━━━━━━━━━━━
           📍 Target: ${targetWaypoint.landmarkDescription ?? 'No landmark'} (Seq ${_currentSequenceNumber})
-          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.92 threshold)" : ""}
+          Turn: ${targetWaypoint.turnType.toString().split('.').last.toUpperCase()} ${isFinalWaypoint ? "FINAL WAYPOINT (0.9 threshold)" : isBeforeTurnWaypoint ? "BEFORE TURN WAYPOINT (0.9 threshold)" : ""}
+          🎯 YOLO: ${_disableYolo ? 'DISABLED' : 'ENABLED'}
           When Recorded: ${targetWaypoint.peopleDetected ? "YES (${targetWaypoint.peopleCount} people)" : "NO people"}
-          Now Detecting: ${navigationResult.peopleDetected ? "YES (${navigationResult.peopleCount} people)" : "NO people"} (YOLO active)
-          � Inpainting: ${navigationResult.peopleDetected ? "Applied (people removed)" : "Not needed"}
-          �🎯 Threshold: ${_currentWaypointThreshold.toStringAsFixed(2)} (dynamic based on people detection)
+          Now Detecting: ${navigationResult.peopleDetected ? "YES (${navigationResult.peopleCount} people)" : "NO people"} ${_disableYolo ? "(YOLO disabled)" : "(YOLO active)"}
+          🎨 Inpainting: ${_disableYolo ? "DISABLED BY USER" : navigationResult.peopleDetected ? "Applied (people removed)" : "Not needed"}
+          🎯 Threshold: ${_currentWaypointThreshold.toStringAsFixed(3)} (dynamic based on people detection)
           👁️ Similarity: ${similarity.toStringAsFixed(3)}
           ${hasVisualMatch ? "✅ MATCH!" : "❌ Too low"} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})
           🔍 Embedding: ${_lastCapturedEmbedding?.length ?? 0} dims
@@ -468,27 +528,19 @@ class RealTimeNavigationService {
       // Check if user has reached the waypoint (visual match only)
       if (hasVisualMatch && hasSufficientSteps) {
         print('✅ All conditions met - Waypoint reached!');
-        // Reset off-track counter on successful waypoint match
-        _consecutiveOffTrackCount = 0;
-        await _waypointReached();
-      } else if (similarity < _offTrackThreshold) {
-        print('Off track - similarity too low (${similarity.toStringAsFixed(3)} < $_offTrackThreshold)');
-        await _handleOffTrack();
-      } else {
-        // Provide guidance toward the target
-        print('Conditions not met:');
-        if (!hasVisualMatch) print('Visual similarity too low: ${similarity.toStringAsFixed(3)} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})');
-        // DISABLED: Step validation
-        // if (!hasSufficientSteps) print('Not enough steps walked');
-        
-        // Reset off-track counter when making progress (similarity above off-track threshold)
-        _consecutiveOffTrackCount = 0;
-        
-        // DISABLED: Step-based guidance
-        // if (hasVisualMatch && !hasSufficientSteps) {
-        //   print('👀 Visual match but need more steps - Continue walking');
-        // }
+        // Reset failure counter on successful waypoint match
+        _consecutiveWaypointFailures = 0;
+        // Record visual match timestamp for guidance logic
+        _lastVisualMatchTime = DateTime.now();
+
+        // Provide guidance immediately when there's a visual match
         await _provideGuidance(targetWaypoint, similarity);
+
+        await _waypointReached();
+      } else {
+        // Track consecutive waypoint progression failures
+        print('Waypoint not reached - similarity: ${similarity.toStringAsFixed(3)} (need ≥${_currentWaypointThreshold.toStringAsFixed(2)})');
+        await _handleWaypointFailure(targetWaypoint, similarity);
       }
       
     } catch (e) {
@@ -500,15 +552,18 @@ class RealTimeNavigationService {
   Future<void> requestRepositioning() async {
     // Can't reposition during initial orientation
     if (_state == NavigationState.initialOrientation) {
-      await _speak('Please complete the initial direction guidance first');
+      await _speak('Complete direction guidance first');
       return;
     }
-    
+
+    // Reset visual match time when repositioning
+    _lastVisualMatchTime = null;
+
     _setState(NavigationState.reorientingUser);
-    
-    await _speak('Let me help you get back on track. Please look around slowly.');
+
+    await _speak('Look around slowly to get back on track.');
     onStatusUpdate?.call('Repositioning - look around slowly');
-    
+
     // Give user time to reorient
     Timer(_repositioningTimeout, () {
       if (_state == NavigationState.reorientingUser) {
@@ -570,7 +625,7 @@ class RealTimeNavigationService {
 
   Future<void> _checkProgress() async {
     if (_currentRoute == null || _state != NavigationState.navigating) return;
-    
+
     // Get current waypoint by sequence number (not array index!)
     final targetWaypoint = _getWaypointBySequence(_currentSequenceNumber);
     if (targetWaypoint == null) {
@@ -579,14 +634,18 @@ class RealTimeNavigationService {
     }
 
     print('Current target: Sequence $_currentSequenceNumber (landmark: ${targetWaypoint.landmarkDescription ?? 'No description'})');
-    
-    // Periodically remind user of current instruction if no recent progress
-    final timeSinceLastGuidance = DateTime.now().difference(_lastGuidanceTime);
-    
-    // Increased reminder interval from 15 to 30 seconds to reduce repetition
-    if (timeSinceLastGuidance > Duration(seconds: 30)) {
-      await _provideGuidance(targetWaypoint, 0.5); // Provide reminder
-    }
+
+    // Guidance is now only provided when there's an actual visual match
+    // This method is used for monitoring and recovery triggering only
+    final now = DateTime.now();
+    final timeSinceLastVisualMatch = _lastVisualMatchTime != null ?
+                                   now.difference(_lastVisualMatchTime!) :
+                                   Duration(days: 1); // If no match ever, set to a large duration
+
+    print('📊 Monitoring: Last visual match ${timeSinceLastVisualMatch.inSeconds}s ago');
+
+    // Could add recovery logic here if no visual match for too long
+    // For now, just monitor without providing guidance
   }
 
   /// Find waypoint by sequence number (proper navigation logic)
@@ -611,10 +670,6 @@ class RealTimeNavigationService {
         .reduce((a, b) => a > b ? a : b);
   }
 
-  // � REMOVED: _hasWalkedSufficientSteps() - using visual-only navigation mode
-
-
-
   Future<void> _waypointReached() async {
     _setState(NavigationState.approachingWaypoint);
     
@@ -636,15 +691,12 @@ class RealTimeNavigationService {
     _lastSpokenInstruction = null;
     _lastInstructionTime = null;
     
-    // DISABLED: Step counter reset
-    // _stepsAtLastWaypoint = _currentTotalSteps;
-    // print('🔄 Step counter reset: Steps at waypoint = $_stepsAtLastWaypoint');
     print('🔄 Waypoint progression (visual-only mode)');
     
     // Move to NEXT SEQUENCE NUMBER, not array index!
     _currentSequenceNumber++;
     print('Moving to next sequence: $_currentSequenceNumber');
-    
+
     // Check if there's a next waypoint
     final nextWaypoint = _getWaypointBySequence(_currentSequenceNumber);
     if (nextWaypoint == null) {
@@ -653,6 +705,7 @@ class RealTimeNavigationService {
     } else {
       // Continue to next waypoint
       _setState(NavigationState.navigating);
+      // Provide initial guidance for the new waypoint
       await _updateNavigationInstruction();
     }
   }
@@ -660,39 +713,365 @@ class RealTimeNavigationService {
   Future<void> _destinationReached() async {
     _setState(NavigationState.destinationReached);
     
-    await _speak('Destination reached');
+    // Get destination direction guidance
+    final directionMessage = await _getDestinationDirectionMessage();
+    
+    await _speak(directionMessage);
     onStatusUpdate?.call('Destination reached');
     
-    // Auto-stop navigation
-    await stopNavigation();
+    // Auto-stop navigation (silent since we already spoke the destination message)
+    await stopNavigation(silent: true);
   }
 
-  /// Simple VIP-friendly off-track handling: Ask user to walk back after 3 consecutive off-track detections
-  Future<void> _handleOffTrack() async {
-    _consecutiveOffTrackCount++;
-    print('📊 Off-track count: $_consecutiveOffTrackCount/$_offTrackThreshold3Times');
+  /// Get destination direction message based on reference direction and last waypoint heading
+  Future<String> _getDestinationDirectionMessage() async {
+    try {
+      if (_currentRoute == null) {
+        return 'Destination reached.';
+      }
+
+      // Get destination node details
+      final destinationNodeId = _currentRoute!.endNodeId;
+      final destinationName = _currentRoute!.endNodeName;
+      
+      print('🎯 Getting direction for destination: $destinationName (ID: $destinationNodeId)');
+      
+      final nodeDetails = await _supabaseService.getMapNodeDetails(destinationNodeId);
+      final referenceDirection = nodeDetails['reference_direction'] as double?;
+      
+      if (referenceDirection == null) {
+        print('⚠️ No reference direction found for destination node');
+        return 'You have reached $destinationName.';
+      }
+
+      // Get the last waypoint heading
+      final lastWaypoint = _getLastWaypoint();
+      if (lastWaypoint == null) {
+        print('⚠️ No last waypoint found');
+        return 'You have reached $destinationName.';
+      }
+
+      final lastWaypointHeading = lastWaypoint.heading;
+      print('📍 Last waypoint heading: ${lastWaypointHeading.toStringAsFixed(1)}°');
+      print('🏢 Destination reference direction: ${referenceDirection.toStringAsFixed(1)}°');
+
+      // Calculate relative direction
+      final relativeDirection = _calculateRelativeDirection(lastWaypointHeading, referenceDirection);
+      
+      return 'You have reached $destinationName. $destinationName is $relativeDirection.';
+      
+    } catch (e) {
+      print('❌ Error getting destination direction: $e');
+      return 'You have reached ${_currentRoute?.endNodeName ?? 'your destination'}.';
+    }
+  }
+
+  /// Get the last waypoint in the route
+  PathWaypoint? _getLastWaypoint() {
+    if (_currentRoute?.waypoints == null || _currentRoute!.waypoints.isEmpty) {
+      return null;
+    }
     
-    // Only trigger recovery action after 3 consecutive off-track detections
-    if (_consecutiveOffTrackCount >= _offTrackThreshold3Times) {
-      _setState(NavigationState.offTrack);
-      
-      // VIP-friendly: Simple instruction to walk back a few steps
-      await _speak('You seem to have gone off course. Please stop and walk back a few steps slowly, then continue.');
-      onStatusUpdate?.call('Off track - walk back a few steps');
-      
-      // Reset counter after providing guidance
-      _consecutiveOffTrackCount = 0;
-      
-      // Return to navigation after brief pause
-      Timer(Duration(seconds: 2), () {
-        if (_state == NavigationState.offTrack) {
-          _setState(NavigationState.navigating);
-          onStatusUpdate?.call('Continue navigation');
-        }
-      });
+    // Find waypoint with highest sequence number
+    PathWaypoint? lastWaypoint;
+    int maxSequence = -1;
+    
+    for (final waypoint in _currentRoute!.waypoints) {
+      if (waypoint.sequenceNumber > maxSequence) {
+        maxSequence = waypoint.sequenceNumber;
+        lastWaypoint = waypoint;
+      }
+    }
+    
+    return lastWaypoint;
+  }
+
+  /// Calculate relative direction (front, left, right) based on waypoint heading and destination reference direction
+  String _calculateRelativeDirection(double waypointHeading, double destinationDirection) {
+    // Calculate the angular difference
+    double angleDiff = destinationDirection - waypointHeading;
+    
+    // Normalize to [-180, 180] range
+    while (angleDiff > 180) angleDiff -= 360;
+    while (angleDiff < -180) angleDiff += 360;
+    
+    print('🧭 Angle difference: ${angleDiff.toStringAsFixed(1)}° (destination - waypoint)');
+    
+    // Determine direction based on angle difference
+    if (angleDiff.abs() <= 45) {
+      return 'in front of you';
+    } else if (angleDiff > 45 && angleDiff <= 135) {
+      return 'on your right';
+    } else if (angleDiff < -45 && angleDiff >= -135) {
+      return 'on your left';
     } else {
-      // Just log the off-track detection but don't alarm the user yet
-      print('⚠️ Off-track detection ${_consecutiveOffTrackCount}/$_offTrackThreshold3Times - continuing without user alert');
+      // 135° to 180° or -135° to -180° (behind)
+      return 'behind you';
+    }
+  }
+
+
+  /// Handle consecutive waypoint progression failures and trigger recovery system
+  Future<void> _handleWaypointFailure(PathWaypoint targetWaypoint, double similarity) async {
+    _consecutiveWaypointFailures++;
+    print('📊 Waypoint failure count: $_consecutiveWaypointFailures/$_waypointFailureThreshold');
+    
+    // Only trigger recovery after 5 consecutive failures
+    if (_consecutiveWaypointFailures >= _waypointFailureThreshold) {
+      print('🚨 5 consecutive waypoint failures - starting recovery system');
+      await _startWaypointRecovery();
+    } else {
+      // Don't provide guidance on waypoint failure
+      // Only provide guidance when there's an actual visual match
+      print('⚠️ Waypoint failure ${_consecutiveWaypointFailures}/$_waypointFailureThreshold - waiting for visual match');
+    }
+  }
+
+  /// Start the waypoint recovery system
+  Future<void> _startWaypointRecovery() async {
+    _setState(NavigationState.awaitingManualCapture);
+    _manualCaptureCount = 0;
+    _capturedRecoveryFrames.clear();
+    // Reset visual match time when entering recovery
+    _lastVisualMatchTime = null;
+    
+    await _speak('Having trouble finding waypoint. Stop and look forward. Capturing images to find location.');
+    onStatusUpdate?.call('Recovery mode - preparing manual capture');
+    
+    // Request UI to start/restart manual capture process (resets UI state)
+    onRequestManualCapture?.call();
+    
+    // Add small delay to ensure UI state is reset before proceeding
+    await Future.delayed(Duration(milliseconds: 100));
+    
+    // Start manual capture process
+    await _requestNextManualCapture();
+  }
+
+  /// Request next manual capture from user
+  Future<void> _requestNextManualCapture() async {
+    if (_manualCaptureCount >= 3) {
+      // All frames captured, analyze them
+      await _analyzeRecoveryFrames();
+      return;
+    }
+    
+    _setState(NavigationState.manualCaptureInProgress);
+    _manualCaptureCount++;
+    
+    await _speak('Capture frame ${_manualCaptureCount} of 3. Point forward and tap capture.');
+    onStatusUpdate?.call('Capture frame ${_manualCaptureCount} of 3');
+  }
+
+  /// Handle manually captured frame
+  Future<void> processManualCapturedFrame(File imageFile) async {
+    if (_state != NavigationState.manualCaptureInProgress) {
+      print('⚠️ Unexpected manual capture - ignoring');
+      return;
+    }
+    
+    try {
+      _capturedRecoveryFrames.add(imageFile);
+      print('📸 Captured recovery frame ${_manualCaptureCount} of 3');
+      
+      onManualFrameCaptured?.call(imageFile);
+      
+      // Request next capture or start analysis
+      await _requestNextManualCapture();
+      
+    } catch (e) {
+      onError?.call('Error processing manual capture: $e');
+    }
+  }
+
+  /// Analyze captured recovery frames and rediscover waypoint
+  Future<void> _analyzeRecoveryFrames() async {
+    _setState(NavigationState.analyzingCapturedFrames);
+    
+    await _speak('Analyzing frames.');
+    onStatusUpdate?.call('Analyzing captured frames...');
+    
+    try {
+      // Generate embeddings for all captured frames
+      List<List<double>> frameEmbeddings = [];
+      for (int i = 0; i < _capturedRecoveryFrames.length; i++) {
+        final file = _capturedRecoveryFrames[i];
+        print('🔍 Processing recovery frame ${i + 1}/${_capturedRecoveryFrames.length}...');
+        
+        final navigationResult = await _clipService.generateNavigationEmbeddingWithInpainting(
+          file,
+          cleanSceneThreshold: _cleanSceneThreshold,
+          peoplePresentThreshold: _peoplePresentThreshold,
+          crowdedSceneThreshold: _crowdedSceneThreshold,
+          disableYolo: _disableYolo,
+        );
+        
+        frameEmbeddings.add(navigationResult.embedding);
+        print('✅ Generated embedding for frame ${i + 1} (${navigationResult.embedding.length} dims)');
+      }
+      
+      // Compare against all waypoints in current route using majority voting
+      final bestMatch = await _findBestWaypointMatch(frameEmbeddings);
+      
+      if (bestMatch != null && bestMatch['similarity'] >= _recoveryThreshold) {
+        final matchedWaypoint = bestMatch['waypoint'] as PathWaypoint;
+        final similarity = bestMatch['similarity'] as double;
+        final votes = bestMatch['votes'] as int;
+        
+        print('✅ Recovery successful: Found waypoint ${matchedWaypoint.sequenceNumber}');
+        print('   Similarity: ${similarity.toStringAsFixed(3)} (≥${_recoveryThreshold})');
+        print('   Votes: $votes/${frameEmbeddings.length}');
+        
+        await _speak('Location found. Resuming navigation.');
+        onStatusUpdate?.call('Location rediscovered - resuming navigation');
+        
+        // Update current position and resume navigation
+        _currentSequenceNumber = matchedWaypoint.sequenceNumber;
+        _consecutiveWaypointFailures = 0;
+        _recoveryAttempts = 0;
+        // Set visual match time to now since we found the location
+        _lastVisualMatchTime = DateTime.now();
+
+          _setState(NavigationState.navigating);
+        // Provide guidance after successful recovery
+        await _provideGuidance(matchedWaypoint, 0.5);
+        
+        // Clean up captured frames
+        await _cleanupRecoveryFrames();
+        
+      } else {
+        // Recovery failed - try moving backward
+        await _handleRecoveryFailure();
+      }
+      
+    } catch (e) {
+      onError?.call('Error analyzing recovery frames: $e');
+      await _handleRecoveryFailure();
+    }
+  }
+
+  /// Find best waypoint match using majority voting
+  Future<Map<String, dynamic>?> _findBestWaypointMatch(List<List<double>> frameEmbeddings) async {
+    if (_currentRoute?.waypoints == null || frameEmbeddings.isEmpty) return null;
+    
+    // Track votes for each waypoint
+    final waypointVotes = <int, int>{}; // sequenceNumber -> vote count
+    final waypointSimilarities = <int, List<double>>{}; // sequenceNumber -> similarities
+    
+    print('🔍 Comparing ${frameEmbeddings.length} frames against ${_currentRoute!.waypoints.length} waypoints');
+    
+    // Compare each frame against all waypoints
+    for (int frameIndex = 0; frameIndex < frameEmbeddings.length; frameIndex++) {
+      final frameEmbedding = frameEmbeddings[frameIndex];
+      
+      double bestSimilarityForFrame = 0.0;
+      int? bestWaypointForFrame;
+      
+      for (final waypoint in _currentRoute!.waypoints) {
+        final similarity = _calculateCosineSimilarity(frameEmbedding, waypoint.embedding);
+        
+        // Initialize tracking for this waypoint
+        waypointSimilarities.putIfAbsent(waypoint.sequenceNumber, () => []);
+        waypointSimilarities[waypoint.sequenceNumber]!.add(similarity);
+        
+        // Check if this is the best match for this frame
+        if (similarity > bestSimilarityForFrame && similarity >= _recoveryThreshold) {
+          bestSimilarityForFrame = similarity;
+          bestWaypointForFrame = waypoint.sequenceNumber;
+        }
+      }
+      
+      // Vote for the best waypoint for this frame
+      if (bestWaypointForFrame != null) {
+        waypointVotes[bestWaypointForFrame] = (waypointVotes[bestWaypointForFrame] ?? 0) + 1;
+        print('  Frame ${frameIndex + 1}: Votes for waypoint $bestWaypointForFrame (similarity: ${bestSimilarityForFrame.toStringAsFixed(3)})');
+    } else {
+        print('  Frame ${frameIndex + 1}: No waypoint above threshold');
+      }
+    }
+    
+    // Find waypoint with most votes
+    if (waypointVotes.isEmpty) return null;
+    
+    int bestSequenceNumber = 0;
+    int maxVotes = 0;
+    
+    for (final entry in waypointVotes.entries) {
+      if (entry.value > maxVotes) {
+        maxVotes = entry.value;
+        bestSequenceNumber = entry.key;
+      }
+    }
+    
+    // Check if we have majority (more than half)
+    final majorityThreshold = (frameEmbeddings.length / 2).ceil();
+    if (maxVotes < majorityThreshold) {
+      print('❌ No majority: Best waypoint $bestSequenceNumber has $maxVotes votes (need ≥$majorityThreshold)');
+      return null;
+    }
+    
+    // Calculate average similarity for the winning waypoint
+    final similarities = waypointSimilarities[bestSequenceNumber] ?? [];
+    final averageSimilarity = similarities.isEmpty ? 0.0 : 
+        similarities.reduce((a, b) => a + b) / similarities.length;
+    
+    // Find the waypoint object
+    final waypoint = _currentRoute!.waypoints.firstWhere(
+      (w) => w.sequenceNumber == bestSequenceNumber,
+    );
+    
+    return {
+      'waypoint': waypoint,
+      'similarity': averageSimilarity,
+      'votes': maxVotes,
+    };
+  }
+
+  /// Handle recovery failure and request backward movement
+  Future<void> _handleRecoveryFailure() async {
+    _recoveryAttempts++;
+    
+    if (_recoveryAttempts >= _maxRecoveryAttempts) {
+      // Max attempts reached - give up
+      _setState(NavigationState.recoveryFailed);
+      
+      await _speak('Unable to find location. Use manual repositioning or restart.');
+      onStatusUpdate?.call('Recovery failed - manual intervention needed');
+      
+      await _cleanupRecoveryFrames();
+      return;
+    }
+    
+    // Request user to move backward and try again
+    await _speak('Location not found. Walk backward a few steps, then try again.');
+    onStatusUpdate?.call('Recovery failed - please move backward and retry');
+    
+    // Wait for user to move backward, then retry
+    Timer(Duration(seconds: 5), () async {
+      if (_state == NavigationState.analyzingCapturedFrames) {
+        await _speak('Try again. Stop and face forward.');
+        await Future.delayed(Duration(seconds: 2));
+        // Clean up any lingering recovery data before restarting
+        await _cleanupRecoveryFrames();
+        await _startWaypointRecovery();
+      }
+    });
+  }
+
+  /// Clean up captured recovery frames
+  Future<void> _cleanupRecoveryFrames() async {
+    try {
+      for (final file in _capturedRecoveryFrames) {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+      _capturedRecoveryFrames.clear();
+      _manualCaptureCount = 0;
+      
+      print('🧹 Cleaned up ${_capturedRecoveryFrames.length} recovery frames');
+    } catch (e) {
+      print('⚠️ Error cleaning up recovery frames: $e');
     }
   }
 
@@ -745,11 +1124,6 @@ class RealTimeNavigationService {
         displayText = 'Turn right';
         spokenInstruction = 'Turn right';
         break;
-      case TurnType.uTurn:
-        instructionType = InstructionType.turnLeft;
-        displayText = 'Turn left';
-        spokenInstruction = 'Turn left';
-        break;
     }
     
     return NavigationInstruction(
@@ -779,6 +1153,7 @@ class RealTimeNavigationService {
     onInstructionUpdate?.call(instruction);
     await _speakSmart(instruction.spokenInstruction);
   }
+
 
   Future<void> _speak(String text) async {
     try {

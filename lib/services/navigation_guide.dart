@@ -197,10 +197,6 @@ class NavigationGuide {
         turnText = "Turn right now";
         instructionType = InstructionType.turnRight;
         break;
-      case TurnType.uTurn:
-        turnText = "Make a U-turn";
-        instructionType = InstructionType.turnLeft;
-        break;
       case TurnType.straight:
         turnText = "Continue straight";
         instructionType = InstructionType.continue_;

@@ -53,7 +53,7 @@ class ContinuousPathRecorder {
   
   // Configuration
   final Duration _captureInterval = const Duration(seconds: 3);
-  final double _significantHeadingChange = 30; // Minimum for decision point
+  final double _significantHeadingChange = 45; // Minimum for decision point
   final Uuid _uuid = const Uuid();
   
   // Current state
@@ -322,8 +322,6 @@ class ContinuousPathRecorder {
     
     if (absChange < _significantHeadingChange) {
       return TurnType.straight;
-    } else if (absChange > 165) {
-      return TurnType.uTurn;
     } else if (headingChange > 0) {
       return TurnType.right;
     } else {
@@ -339,8 +337,6 @@ class ContinuousPathRecorder {
         return 'Turn left (${headingChange.abs().round()}°)';
       case TurnType.right:
         return 'Turn right (${headingChange.abs().round()}°)';
-      case TurnType.uTurn:
-        return 'U-turn (${headingChange.abs().round()}°)';
     }
   }
 
