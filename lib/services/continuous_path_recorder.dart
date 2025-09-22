@@ -481,7 +481,6 @@ class ContinuousPathRecorder {
         distanceFromPrevious: filteredWaypoints[i].distanceFromPrevious,
         timestamp: filteredWaypoints[i].timestamp,
         sequenceNumber: i,
-        // 🐛 FIX: Preserve people detection data during filtering
         peopleDetected: filteredWaypoints[i].peopleDetected,
         peopleCount: filteredWaypoints[i].peopleCount,
         peopleConfidenceScores: filteredWaypoints[i].peopleConfidenceScores,
@@ -493,7 +492,6 @@ class ContinuousPathRecorder {
     print('Original waypoints: ${_waypoints.length + removedCount}');
     print('Removed duplicates: $removedCount');
     print('Final waypoints: ${_waypoints.length}');
-    // Status message removed as requested
   }
 
   double _calculateCosineSimilarity(List<double> vec1, List<double> vec2) {
@@ -525,7 +523,6 @@ class ContinuousPathRecorder {
     double estimatedDistance = _waypoints.fold(0.0, (sum, waypoint) =>
         sum + (waypoint.distanceFromPrevious ?? 0.0));
     
-    // Step calculation removed - not reliable
     int estimatedSteps = 0;
     
     return NavigationPath(

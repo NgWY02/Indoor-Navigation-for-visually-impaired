@@ -469,6 +469,9 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
   Future<void> _startNavigation() async {
     if (_selectedRoute == null) return;
 
+    // Sync YOLO state with service before starting navigation
+    _navigationService.setDisableYolo(_disableYolo);
+
     setState(() {
       _screenState = NavigationScreenState.navigating;
       _statusMessage = 'Starting navigation...';
@@ -485,6 +488,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 📍 Route: ${_selectedRoute!.pathName}
 📊 Total Waypoints: ${_selectedRoute!.waypoints.length}
 🧭 Starting orientation phase...
+🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ''';
     });
@@ -1603,7 +1607,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
             }
           } else if (message.contains('Batch VLM verification') || message.contains('VLM verification')) {
             try {
-              await _flutterTts.speak('Please wait while I verify the location with AI. This may take a moment.');
+              await _flutterTts.speak('Verifying location. Please wait a moment.');
               print('🔊 Audio: GPT verification in progress');
             } catch (e) {
               print('TTS Error during GPT verification: $e');
@@ -1773,6 +1777,9 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
     if (_selectedRoute != null) {
       await _navigationService.stopNavigation();
 
+      // Sync YOLO state with service before restarting navigation
+      _navigationService.setDisableYolo(_disableYolo);
+
       setState(() {
         // Update debug info for navigation restart
         _debugInfo = '''
@@ -1782,6 +1789,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 📍 Route: ${_selectedRoute!.pathName}
 📊 Total Waypoints: ${_selectedRoute!.waypoints.length}
 🧭 Restarting orientation phase...
+🎯 YOLO Detection: ${_disableYolo ? 'DISABLED' : 'ENABLED'}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ''';
       });

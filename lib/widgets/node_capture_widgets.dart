@@ -72,7 +72,7 @@ class MapSelectionView extends StatelessWidget {
   final TextEditingController nodeNameController;
   final Function(Offset position) onPositionSelected;
   final List<Map<String, dynamic>> existingNodes;
-  final bool showDirectionCapture; // New parameter to control whether to show direction capture
+  final bool showDirectionCapture; 
 
   const MapSelectionView({
     Key? key,
@@ -84,12 +84,11 @@ class MapSelectionView extends StatelessWidget {
     required this.nodeNameController,
     required this.onPositionSelected,
     required this.existingNodes,
-    this.showDirectionCapture = false, // Default to false
+    this.showDirectionCapture = false,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // Calculate aspect ratio of the map image
     final double mapAspectRatio = mapImage.width / mapImage.height;
     
     return SingleChildScrollView(
@@ -112,19 +111,15 @@ class MapSelectionView extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             
-            // Map with gesture detector
             Container(
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.grey),
               ),
-              // Use LayoutBuilder to get available width and maintain aspect ratio
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  // Calculate height based on available width and aspect ratio
                   final containerWidth = constraints.maxWidth;
                   final containerHeight = containerWidth / mapAspectRatio;
                   
-                  // Calculate scale factors for node positioning
                   final scaleX = containerWidth / mapImage.width;
                   final scaleY = containerHeight / mapImage.height;
                   
@@ -137,7 +132,6 @@ class MapSelectionView extends StatelessWidget {
                       maxScale: 4.0,
                       child: GestureDetector(
                         onTapDown: (TapDownDetails details) {
-                          // Adjust tap position based on scale
                           final adjustedPosition = Offset(
                             details.localPosition.dx / scaleX,
                             details.localPosition.dy / scaleY
@@ -152,31 +146,29 @@ class MapSelectionView extends StatelessWidget {
                               height: containerHeight,
                               child: RawImage(
                                 image: mapImage,
-                                fit: BoxFit.fill, // Use fill to ensure the image fills the container
+                                fit: BoxFit.fill, 
                                 width: containerWidth,
                                 height: containerHeight,
                               ),
                             ),
                             
-                            // Markers for existing nodes
                             ...existingNodes.map((node) {
-                              // Get original coordinates from database
                               final double x = (node['x_position'] as num?)?.toDouble() ?? 0.0;
                               final double y = (node['y_position'] as num?)?.toDouble() ?? 0.0;
-                              
+
                               // Scale coordinates to current view
                               final double displayX = x * scaleX;
                               final double displayY = y * scaleY;
-                              
+
                               return Positioned(
-                                left: displayX - 10, // Adjust offset for marker
-                                top: displayY - 10,  // Adjust offset for marker
+                                left: displayX - 6,
+                                top: displayY - 6,
                                 child: Tooltip(
-                                  message: node['name'] ?? 'Existing Node', 
+                                  message: node['name'] ?? 'Existing Node',
                                   child: const Icon(
                                     Icons.circle,
                                     color: Colors.blue,
-                                    size: 20,
+                                    size: 12,
                                   ),
                                 ),
                               );
@@ -245,8 +237,8 @@ class CompassDirectionView extends StatefulWidget {
 class _CompassDirectionViewState extends State<CompassDirectionView> {
   StreamSubscription<CompassEvent>? _compassSubscription;
   double? _currentHeading;
-  bool _showCaptureSuccess = false; // Add state for temporary success indicator
-  Timer? _feedbackTimer; // Timer to control the visibility of the success indicator
+  bool _showCaptureSuccess = false; 
+  Timer? _feedbackTimer; 
   
   @override
   void initState() {
@@ -255,7 +247,6 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
   }
   
   void _initializeCompass() {
-    // Check if compass is available on this device
     if (FlutterCompass.events == null) {
       return;
     }
@@ -362,7 +353,7 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
                         height: 140,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: Colors.green.withOpacity(0.3),
+                          color: Colors.green.withValues(alpha:0.3),
                         ),
                         child: const Center(
                           child: Icon(
@@ -432,7 +423,7 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
                     const SizedBox(width: 16),
                     // Refresh button to recapture
                     ElevatedButton.icon(
-                      onPressed: _handleCapture, // Use the handle method instead
+                      onPressed: _handleCapture, 
                       icon: const Icon(Icons.refresh),
                       label: const Text('Recapture'),
                       style: ElevatedButton.styleFrom(
@@ -443,7 +434,7 @@ class _CompassDirectionViewState extends State<CompassDirectionView> {
                   ],
                 )
               : ElevatedButton.icon(
-                  onPressed: _handleCapture, // Use the handle method instead
+                  onPressed: _handleCapture, 
                   icon: const Icon(Icons.camera),
                   label: const Text('Capture Current Direction'),
                   style: ElevatedButton.styleFrom(
@@ -553,44 +544,42 @@ class ProcessingView extends StatelessWidget {
 class ActionButton extends StatelessWidget {
   final bool isVideoLoaded;
   final VoidCallback? onVideoLoaded;
-  final String buttonText; // NEW: Dynamic button text for different modes
+  final String buttonText; 
   final bool isNamedPositionSelected;
   final VoidCallback? onResetVideo;
-  final String resetButtonText; // NEW: Dynamic text for reset button
+  final String resetButtonText; 
   final bool isPositionSelected;
   final bool isNameEntered;
-  final bool isDirectionCaptured; // Add this parameter for direction capture
+  final bool isDirectionCaptured;
   final VoidCallback? onProceedToCamera;
   final bool isReadyForCameraView;
   final VoidCallback? onLaunchCamera;
-  final bool canSaveWithoutVideo; // NEW: For edit mode to save without new video
-  final VoidCallback? onSaveWithoutVideo; // NEW: Callback for saving edits without video
+  final bool canSaveWithoutVideo;
+  final VoidCallback? onSaveWithoutVideo; 
 
   const ActionButton({
     Key? key,
     required this.isVideoLoaded,
     this.onVideoLoaded,
-    this.buttonText = 'Process Video', // Default text
+    this.buttonText = 'Process Video', 
     required this.isNamedPositionSelected,
     this.onResetVideo,
-    this.resetButtonText = 'Record Again', // Default text
+    this.resetButtonText = 'Record Again', 
     required this.isPositionSelected,
     required this.isNameEntered,
-    required this.isDirectionCaptured, // Add direction parameter
+    required this.isDirectionCaptured,
     this.onProceedToCamera,
     required this.isReadyForCameraView,
     this.onLaunchCamera,
-    this.canSaveWithoutVideo = false, // Default to false
+    this.canSaveWithoutVideo = false, 
     this.onSaveWithoutVideo,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    // 1. Video is loaded - Show Process/Update button
     if (isVideoLoaded) {
       return Row(
         children: [
-          // Optional: Add Record Again button
           if (onResetVideo != null)
             Expanded(
               child: OutlinedButton(
@@ -599,7 +588,7 @@ class ActionButton extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   minimumSize: const Size(double.infinity, 50),
                 ),
-                child: Text(resetButtonText), // Use dynamic text
+                child: Text(resetButtonText), 
               ),
             ),
           if (onResetVideo != null) const SizedBox(width: 8),
@@ -613,7 +602,7 @@ class ActionButton extends StatelessWidget {
                 foregroundColor: Colors.white,
               ),
               child: Text(
-                buttonText, // Use dynamic text
+                buttonText, 
                 style: const TextStyle(color: Colors.white),
               ),
             ),
@@ -621,12 +610,9 @@ class ActionButton extends StatelessWidget {
         ],
       );
     }
-
-    // NEW: For edit mode - Show 'Save Changes' button without requiring new video
     if (canSaveWithoutVideo && onSaveWithoutVideo != null) {
       return Row(
         children: [
-          // Option to record video if desired
           Expanded(
             child: OutlinedButton(
               onPressed: onLaunchCamera,
@@ -638,7 +624,6 @@ class ActionButton extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Save changes without new video
           Expanded(
             child: ElevatedButton(
               onPressed: onSaveWithoutVideo,
@@ -658,14 +643,13 @@ class ActionButton extends StatelessWidget {
       );
     }
 
-    // 2. Ready for camera view (AFTER clicking Next or in edit mode), but no video loaded yet - Show Record button
     if (isReadyForCameraView && !isVideoLoaded && onLaunchCamera != null) {
       return ElevatedButton(
         onPressed: onLaunchCamera,
         style: ElevatedButton.styleFrom(
           padding: const EdgeInsets.symmetric(vertical: 16),
           minimumSize: const Size(double.infinity, 50),
-          backgroundColor: Colors.red, // Use red color for recording action
+          backgroundColor: Colors.red, 
           foregroundColor: Colors.white,
         ),
         child: const Text(
@@ -675,7 +659,6 @@ class ActionButton extends StatelessWidget {
       );
     }
 
-    // 3. Position selected, name entered, and direction captured - Show Next button
     if (isPositionSelected && isNameEntered && isDirectionCaptured && onProceedToCamera != null && !isReadyForCameraView) {
       return ElevatedButton(
         onPressed: onProceedToCamera,
@@ -692,12 +675,10 @@ class ActionButton extends StatelessWidget {
       );
     }
     
-    // 4. Default/Fallback - Show nothing or disabled button
     return const SizedBox.shrink();
   }
 }
 
-// New widget for dedicated direction capture screen
 class DirectionCaptureView extends StatelessWidget {
   final String locationName;
   final VoidCallback? onCaptureDirection;
@@ -718,7 +699,6 @@ class DirectionCaptureView extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
             Center(
               child: Text(
                 'Set Entrance Direction for "$locationName"',
@@ -731,7 +711,6 @@ class DirectionCaptureView extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             
-            // Instructions
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -765,7 +744,6 @@ class DirectionCaptureView extends StatelessWidget {
             ),
             const SizedBox(height: 24),
             
-            // Compass
             const Text(
               'Direction Capture',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -777,7 +755,6 @@ class DirectionCaptureView extends StatelessWidget {
               capturedDirection: capturedDirection,
             ),
             
-            // Status message
             if (capturedDirection != null) ...[
               const SizedBox(height: 16),
               Center(

@@ -442,15 +442,15 @@ class _NodeConnectionScreenState extends State<NodeConnectionScreen> {
     bool isSelected = _isConnectionMode && nodeId == _selectedStartNodeId;
 
     return Positioned(
-      left: displayX - 15,
-      top: displayY - 15,
+      left: displayX - 8,
+      top: displayY - 8,
       child: GestureDetector(
         onTap: () => _onNodeTapped(nodeId, node['name'] ?? 'Node $index'),
         child: Tooltip(
           message: node['name'] ?? 'Node $index',
           child: Container(
-            width: 30,
-            height: 30,
+            width: 16,
+            height: 16,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isSelected ? Colors.orange : Colors.blue,

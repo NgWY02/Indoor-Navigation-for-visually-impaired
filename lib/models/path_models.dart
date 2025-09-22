@@ -156,7 +156,7 @@ class Landmark {
         bbox['right'],
         bbox['bottom'],
       ),
-      imageFrame: Uint8List(0), // Will be loaded separately
+      imageFrame: Uint8List(0),
       confidence: json['confidence'],
       stepCount: json['stepCount'],
       distance: json['distance'],

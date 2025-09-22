@@ -67,12 +67,10 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
         _isSuccess = true;
       });
 
-      // Log out the user and navigate to login screen
       await _supabaseService.signOut();
       
       if (!mounted) return;
       
-      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Password updated successfully! Please login with your new password.'),
@@ -89,7 +87,6 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
 
     } catch (e) {
       setState(() {
-        // Show user-friendly error messages
         if (e.toString().toLowerCase().contains('session')) {
           _errorMessage = 'Session expired. Please request a new password reset link.';
         } else if (e.toString().toLowerCase().contains('token')) {
@@ -342,8 +339,6 @@ class _NewPasswordScreenState extends State<NewPasswordScreen> {
                             style: TextStyle(fontSize: 14),
                           ),
                         ),
-                        
-                        // Extra bottom padding for safe area
                         SizedBox(height: mediaQuery.padding.bottom + 16),
                       ],
                     ),
