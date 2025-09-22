@@ -94,7 +94,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Header section
                       Icon(
                         Icons.lock_reset,
                         size: iconSize,

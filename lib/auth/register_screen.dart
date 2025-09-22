@@ -25,7 +25,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isAdmin = false;
   bool _showAdminCodeField = false;
   
-  // This would be securely stored on your backend in a real app
   static const String _adminRegistrationCode = "ADMIN123";
 
   @override
@@ -54,7 +53,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
 
     try {
-      // Step 1: Check if the email already exists using our new RPC function
       final emailExists = await _supabaseService.checkEmailExists(_emailController.text.trim());
       
       if (emailExists) {
@@ -62,10 +60,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
           _errorMessage = 'This email is already registered. Please try logging in.';
           _isLoading = false;
         });
-        return; // Stop the registration process
+        return;
       }
       
-      // Step 2: If email does not exist, proceed with signup
       final result = await _supabaseService.signUpWithCheck(
         email: _emailController.text.trim(),
         password: _passwordController.text,
@@ -84,9 +81,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.of(context).pop(); // Go back to login screen
+        Navigator.of(context).pop(); 
       } else {
-        // This case should now be rare, but we'll handle it
         setState(() {
           _errorMessage = 'An unexpected error occurred. The email might already be registered.';
         });
@@ -129,7 +125,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     final keyboardHeight = mediaQuery.viewInsets.bottom;
     final isKeyboardVisible = keyboardHeight > 0;
 
-    // Phone-focused responsive sizing with small phone adjustments
     final bool isSmallPhone = screenHeight < 600;
     final double iconSize = isKeyboardVisible ? 50.0 : 70.0;
     final double titleFontSize = screenWidth < 360 ? 20.0 : 22.0;
@@ -466,7 +461,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         ),
                       ),
                     ),
-                    // Extra bottom padding for safe area
                     SizedBox(height: mediaQuery.padding.bottom + 16),
                   ],
                 ),

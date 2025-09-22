@@ -93,7 +93,7 @@ class RealTimeNavigationService {
   NavigationRoute? get currentRoute => _currentRoute;
   int get currentWaypointIndex => _currentWaypointIndex;
   double get progressPercentage => _currentRoute != null
-      ? ((_currentSequenceNumber + 1) / _currentRoute!.waypoints.length) * 100
+      ? (_currentSequenceNumber / _currentRoute!.waypoints.length) * 100
       : 0.0;
   
   /// Get the current compass heading (null if not available)
@@ -741,14 +741,14 @@ class RealTimeNavigationService {
       
       if (referenceDirection == null) {
         print('⚠️ No reference direction found for destination node');
-        return 'You have reached $destinationName.';
+        return 'Stop, you have reached $destinationName.';
       }
 
       // Get the last waypoint heading
       final lastWaypoint = _getLastWaypoint();
       if (lastWaypoint == null) {
         print('⚠️ No last waypoint found');
-        return 'You have reached $destinationName.';
+        return 'Stop, you have reached $destinationName.';
       }
 
       final lastWaypointHeading = lastWaypoint.heading;
@@ -758,11 +758,11 @@ class RealTimeNavigationService {
       // Calculate relative direction
       final relativeDirection = _calculateRelativeDirection(lastWaypointHeading, referenceDirection);
       
-      return 'You have reached $destinationName. $destinationName is $relativeDirection.';
+      return 'Stop, you have reached $destinationName. $destinationName is $relativeDirection.';
       
     } catch (e) {
       print('❌ Error getting destination direction: $e');
-      return 'You have reached ${_currentRoute?.endNodeName ?? 'your destination'}.';
+      return 'Stop, you have reached ${_currentRoute?.endNodeName ?? 'your destination'}.';
     }
   }
 

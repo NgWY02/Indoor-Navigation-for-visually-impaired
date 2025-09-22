@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Debug overlay widget to display navigation debug information on screen
+//Debug overlay widget to display navigation debug information on screen
 class DebugOverlay extends StatelessWidget {
   final String debugInfo;
   final bool isVisible;
@@ -22,49 +22,48 @@ class DebugOverlay extends StatelessWidget {
     
     if (!isVisible) {
       return Positioned(
-        top: mediaQuery.padding.top + (isSmallScreen ? 50 : 60), // Lowered to match new debug overlay position
+        top: mediaQuery.padding.top + (isSmallScreen ? 50 : 60), 
         right: isSmallScreen ? 8 : 10,
         child: FloatingActionButton(
           mini: true,
           onPressed: onToggle,
-          backgroundColor: Colors.red.withValues(alpha: 0.5), // Even more transparent (was 0.7)
+          backgroundColor: Colors.red.withValues(alpha: 0.5), 
           child: const Icon(Icons.bug_report, color: Colors.white, size: 18),
         ),
       );
     }
 
     return Positioned(
-      top: mediaQuery.padding.top + (isSmallScreen ? 50 : 60), // Lowered down to avoid voice indicator overlap
+      top: mediaQuery.padding.top + (isSmallScreen ? 50 : 60), 
       left: isSmallScreen ? 4 : 6,
       right: isSmallScreen ? 4 : 6,
       child: Container(
         constraints: BoxConstraints(
-          maxHeight: screenHeight * (isSmallScreen ? 0.35 : 0.4), // Adaptive height
+          maxHeight: screenHeight * (isSmallScreen ? 0.35 : 0.4), 
           maxWidth: screenWidth - (isSmallScreen ? 8 : 12),
         ),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.6), // Even more transparent (was 0.9)
+          color: Colors.black.withValues(alpha: 0.6), 
           borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 12),
-          border: Border.all(color: Colors.red.withValues(alpha: 0.6), width: 1.5), // Also more transparent
+          border: Border.all(color: Colors.red.withValues(alpha: 0.6), width: 1.5), 
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3), // More transparent shadow (was 0.4)
-              blurRadius: 8, // Slightly reduced blur
-              offset: const Offset(0, 2), // Reduced offset
+              color: Colors.black.withValues(alpha: 0.3), 
+              blurRadius: 8, 
+              offset: const Offset(0, 2), 
             ),
           ],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header with close button
             Container(
               padding: EdgeInsets.symmetric(
                 horizontal: isSmallScreen ? 8 : 12, 
                 vertical: isSmallScreen ? 6 : 8,
               ),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.6), // More transparent header (was 0.8)
+                color: Colors.red.withValues(alpha: 0.6), 
                 borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(10),
                   topRight: Radius.circular(10),
@@ -90,11 +89,11 @@ class DebugOverlay extends StatelessWidget {
                   GestureDetector(
                     onTap: onToggle,
                     child: Container(
-                      width: isSmallScreen ? 32 : 36, // Larger touch target
-                      height: isSmallScreen ? 32 : 36, // Larger touch target
+                      width: isSmallScreen ? 32 : 36, 
+                      height: isSmallScreen ? 32 : 36, 
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.3), // More visible background
+                        color: Colors.white.withValues(alpha: 0.3), 
                         shape: BoxShape.circle,
                         border: Border.all(
                           color: Colors.white.withValues(alpha: 0.5),
@@ -104,7 +103,7 @@ class DebugOverlay extends StatelessWidget {
                       child: Icon(
                         Icons.close,
                         color: Colors.white,
-                        size: isSmallScreen ? 18 : 20, // Larger icon for better visibility
+                        size: isSmallScreen ? 18 : 20, 
                       ),
                     ),
                   ),
@@ -118,7 +117,6 @@ class DebugOverlay extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Format debug info with better structure
                     if (debugInfo.isNotEmpty) ...[
                       _buildFormattedDebugText(debugInfo, isSmallScreen),
                     ] else ...[
@@ -142,13 +140,11 @@ class DebugOverlay extends StatelessWidget {
   }
 
   Widget _buildFormattedDebugText(String debugInfo, bool isSmallScreen) {
-    // Split debug info into lines and format each one
     final lines = debugInfo.split('\n').where((line) => line.trim().isNotEmpty);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: lines.map((line) {
-        // Check if line starts with emoji or special characters
         final hasEmoji = line.trim().startsWith(RegExp(r'[^\w\s]'));
         final isError = line.contains('Error') || line.contains('Failed') || line.contains('Exception');
         final isSuccess = line.contains('Success') || line.contains('✅') || line.contains('Complete');

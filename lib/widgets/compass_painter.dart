@@ -21,13 +21,13 @@ class CompassPainter extends CustomPainter {
 
     // Draw outer circle background
     final backgroundPaint = Paint()
-      ..color = Colors.black.withOpacity(0.7)
+      ..color = Colors.black.withValues(alpha:0.7)
       ..style = PaintingStyle.fill;
     canvas.drawCircle(center, radius, backgroundPaint);
 
     // Draw outer circle border
     final borderPaint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
+      ..color = Colors.white.withValues(alpha:0.3)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 2.0;
     canvas.drawCircle(center, radius, borderPaint);
@@ -85,7 +85,7 @@ class CompassPainter extends CustomPainter {
 
   void _drawDegreeMarkings(Canvas canvas, Offset center, double radius) {
     final markPaint = Paint()
-      ..color = Colors.white.withOpacity(0.4)
+      ..color = Colors.white.withValues(alpha: 0.4)
       ..strokeWidth = 1.0;
 
     for (int deg = 0; deg < 360; deg += 10) {
@@ -109,8 +109,8 @@ class CompassPainter extends CustomPainter {
   void _drawTargetSector(Canvas canvas, Offset center, double radius) {
     // Draw target sector
     final sectorColor = isWithinRange 
-        ? Colors.green.withOpacity(0.3) 
-        : Colors.orange.withOpacity(0.3);
+        ? Colors.green.withValues(alpha:0.3) 
+        : Colors.orange.withValues(alpha:0.3);
     
     final sectorPaint = Paint()
       ..color = sectorColor

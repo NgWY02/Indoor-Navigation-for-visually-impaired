@@ -845,15 +845,15 @@ class _MapDetailsScreenState extends State<MapDetailsScreen> {
     final double displayY = y * scaleY;
     
     return Positioned(
-      left: displayX - 15,
-      top: displayY - 15,
+      left: displayX - 8,
+      top: displayY - 8,
       child: GestureDetector(
         onTap: () => _onNodeTapped(nodeId, node['name'] ?? 'Node $index'),
         child: Tooltip(
           message: node['name'] ?? 'Node $index',
           child: Container(
-            width: 30,
-            height: 30,
+            width: 16,
+            height: 16,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: Colors.blue,

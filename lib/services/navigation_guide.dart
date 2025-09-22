@@ -265,7 +265,7 @@ class NavigationGuide {
     _isNavigating = false;
     
     NavigationInstruction arrivalInstruction = NavigationInstruction(
-      "You have arrived at your destination: ${_currentPath!.endLocationId}",
+      "Stop. You have arrived at your destination: ${_currentPath!.endLocationId}",
       InstructionType.arrive,
     );
     
