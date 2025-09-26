@@ -1213,7 +1213,7 @@ if __name__ == "__main__":
     print()
     
     uvicorn.run(
-        "clip_http_gateway:app",
+        "dinov2_http_gateway:app",
         host="0.0.0.0",  # Bind to all interfaces so Android can connect
         port=8000,
         reload=False,
