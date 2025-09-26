@@ -354,19 +354,19 @@ class SupabaseService {
   /// This can help resolve RLS policy violations
   Future<bool> refreshSession() async {
     try {
-      print('🔄 Attempting to refresh authentication session...');
+      print('Attempting to refresh authentication session...');
       final response = await client.auth.refreshSession();
 
       if (response.session != null) {
-        print('✅ Session refreshed successfully');
+        print('Session refreshed successfully');
         print('New session expires at: ${response.session!.expiresAt}');
         return true;
       } else {
-        print('❌ Session refresh failed - no session returned');
+        print('Session refresh failed - no session returned');
         return false;
       }
     } catch (e) {
-      print('❌ Error refreshing session: $e');
+      print('Error refreshing session: $e');
       return false;
     }
   }
@@ -375,7 +375,7 @@ class SupabaseService {
   Future<Map<String, dynamic>> debugUserAuthStatus() async {
     try {
       final userId = currentUser?.id;
-      print('🔍 DEBUG: Checking user auth status for: $userId');
+      print('DEBUG: Checking user auth status for: $userId');
 
       final result = {
         'client_user_id': userId,
@@ -398,12 +398,12 @@ class SupabaseService {
           if (profileResponse != null) {
             result['user_role_exists'] = true;
             result['user_role'] = profileResponse['role'];
-            print('✅ User profile found: ${profileResponse['role']}');
+            print('User profile found: ${profileResponse['role']}');
           } else {
-            print('❌ No user profile found for user: $userId');
+            print('No user profile found for user: $userId');
           }
         } catch (roleError) {
-          print('❌ Error checking user profile: $roleError');
+          print('Error checking user profile: $roleError');
           result['role_check_error'] = roleError.toString();
         }
 
@@ -416,17 +416,17 @@ class SupabaseService {
               .limit(1);
 
           result['user_exists_in_auth'] = testQuery.isNotEmpty;
-          print('✅ User exists in auth context: ${testQuery.isNotEmpty}');
+          print('User exists in auth context: ${testQuery.isNotEmpty}');
         } catch (authError) {
-          print('❌ Error checking auth context: $authError');
+          print('Error checking auth context: $authError');
           result['auth_check_error'] = authError.toString();
         }
       }
 
-      print('🔍 DEBUG: Auth status result: $result');
+      print('DEBUG: Auth status result: $result');
       return result;
     } catch (e) {
-      print('❌ Error in debugUserAuthStatus: $e');
+      print('Error in debugUserAuthStatus: $e');
       return {'error': e.toString()};
     }
   }
@@ -436,7 +436,7 @@ class SupabaseService {
     try {
       final userId = currentUser?.id;
       if (userId == null) {
-        print('❌ No current user to fix role for');
+        print('No current user to fix role for');
         return false;
       }
 
@@ -446,9 +446,9 @@ class SupabaseService {
 
       if (userMeta != null && userMeta.containsKey('role')) {
         intendedRole = userMeta['role'] as String;
-        print('🔍 Found intended role in metadata: $intendedRole');
+        print('Found intended role in metadata: $intendedRole');
       } else {
-        print('⚠️ No role found in user metadata, keeping current role');
+        print('WARNING: No role found in user metadata, keeping current role');
         return true; // No change needed
       }
 
@@ -458,10 +458,10 @@ class SupabaseService {
           .update({'role': intendedRole, 'updated_at': DateTime.now().toIso8601String()})
           .eq('id', userId);
 
-      print('✅ User role updated to: $intendedRole');
+      print('User role updated to: $intendedRole');
       return true;
     } catch (e) {
-      print('❌ Error fixing user role: $e');
+      print('Error fixing user role: $e');
       return false;
     }
   }
@@ -472,7 +472,7 @@ class SupabaseService {
       // Only allow if current user is admin
       final currentRole = await getUserRole();
       if (currentRole != 'admin') {
-        print('❌ Only admins can fix all user roles');
+        print('Only admins can fix all user roles');
         return 0;
       }
 
@@ -500,17 +500,17 @@ class SupabaseService {
                 .eq('id', userId);
 
             fixedCount++;
-            print('✅ Fixed role for user: $userId');
+            print('Fixed role for user: $userId');
           }
         } catch (e) {
-          print('⚠️ Could not check metadata for user $userId: $e');
+          print('WARNING: Could not check metadata for user $userId: $e');
         }
       }
 
-      print('✅ Fixed roles for $fixedCount users');
+      print('Fixed roles for $fixedCount users');
       return fixedCount;
     } catch (e) {
-      print('❌ Error fixing all admin roles: $e');
+      print('Error fixing all admin roles: $e');
       return 0;
     }
   }
@@ -707,9 +707,9 @@ class SupabaseService {
       final userId = currentUser?.id;
       final isAdminUser = await isAdmin();
 
-      print('🔍 DEBUG: getMaps() called');
-      print('🔍 DEBUG: Current user ID: $userId');
-      print('🔍 DEBUG: Is admin: $isAdminUser');
+      print('DEBUG: getMaps() called');
+      print('DEBUG: Current user ID: $userId');
+      print('DEBUG: Is admin: $isAdminUser');
 
       final query = client.from('maps').select('*, map_nodes(count)');
 
@@ -717,21 +717,21 @@ class SupabaseService {
         // For non-admin users, get only public maps or their own
         if (userId != null) {
           query.or('is_public.eq.true,user_id.eq.$userId');
-          print('🔍 DEBUG: Query filter: is_public=true OR user_id=$userId');
+          print('DEBUG: Query filter: is_public=true OR user_id=$userId');
         } else {
           query.eq('is_public', true);
-          print('🔍 DEBUG: Query filter: is_public=true (no user)');
+          print('DEBUG: Query filter: is_public=true (no user)');
         }
       } else {
-        print('🔍 DEBUG: Admin user - getting all maps');
+        print('DEBUG: Admin user - getting all maps');
       }
 
       final response = await query;
-      print('🔍 DEBUG: Query returned ${response.length} maps');
+      print('DEBUG: Query returned ${response.length} maps');
 
       // Log details of each map for debugging
       for (var map in response) {
-        print('🔍 DEBUG: Map ${map['id']}: name=${map['name']}, user_id=${map['user_id']}, is_public=${map['is_public']}');
+        print('DEBUG: Map ${map['id']}: name=${map['name']}, user_id=${map['user_id']}, is_public=${map['is_public']}');
       }
 
       // Process the response to get the node count correctly
@@ -1109,7 +1109,7 @@ class SupabaseService {
       // Get user's organization for embedding context
       final userProfile = await getCurrentUserProfile();
       final userOrganizationId = userProfile?['organization_id'];
-      print('👤 Saving embedding for user organization: $userOrganizationId');
+      print('Saving embedding for user organization: $userOrganizationId');
 
       // For 360-degree videos, we want multiple embeddings per node, so always create new ones
       // Only try to update if explicitly not forced to create and nodeId is provided
@@ -1185,7 +1185,7 @@ class SupabaseService {
       final userOrganizationId = userProfile?['organization_id'];
       final isAdminUser = await isAdmin();
 
-      print('👤 getAllEmbeddings() - User organization: $userOrganizationId, Is Admin: $isAdminUser');
+      print('getAllEmbeddings() - User organization: $userOrganizationId, Is Admin: $isAdminUser');
 
       final query = client.from('place_embeddings').select('place_name, embedding, organization_id');
 
@@ -1194,15 +1194,15 @@ class SupabaseService {
         // Admin users can see ALL content from their organization (including other admins' content)
         if (userOrganizationId != null) {
           query.or('organization_id.eq.$userOrganizationId,organization_id.is.null');
-          print('🔓 Admin user - filtering by organization: $userOrganizationId (including null org for compatibility)');
+          print('Admin user - filtering by organization: $userOrganizationId (including null org for compatibility)');
         } else {
           // Admin with no organization can only see their own content
           final userId = currentUser?.id;
           if (userId != null) {
             query.eq('user_id', userId);
-            print('🔓 Admin user (no organization) - filtering by user: $userId');
+            print('Admin user (no organization) - filtering by user: $userId');
           } else {
-            print('⚠️ No user ID available for admin filtering');
+            print('WARNING: No user ID available for admin filtering');
             return {};
           }
         }
@@ -1210,15 +1210,15 @@ class SupabaseService {
         // Regular users can see content from their organization OR null organization_id (backward compatibility)
         if (userOrganizationId != null) {
           query.or('organization_id.eq.$userOrganizationId,organization_id.is.null');
-          print('🔒 Regular user - filtering by organization: $userOrganizationId (including null org for compatibility)');
+          print('Regular user - filtering by organization: $userOrganizationId (including null org for compatibility)');
         } else {
           // Users without organization can only see their own embeddings
           final userId = currentUser?.id;
           if (userId != null) {
             query.eq('user_id', userId);
-            print('🔒 Regular user (no organization) - filtering by user: $userId');
+            print('Regular user (no organization) - filtering by user: $userId');
           } else {
-            print('⚠️ No user ID available for filtering');
+            print('WARNING: No user ID available for filtering');
             return {};
           }
         }
@@ -1286,84 +1286,11 @@ class SupabaseService {
         finalEmbeddings[placeName] = averagedEmbedding;
       });
 
-      print('📊 Retrieved ${finalEmbeddings.length} unique place embeddings');
+      print('Retrieved ${finalEmbeddings.length} unique place embeddings');
       return finalEmbeddings;
     } catch (e) {
       print('Error loading embeddings: $e');
       return {};
-    }
-  }
-
-  // Navigation Connection Methods
-  Future<String> createNodeConnection({
-    required String mapId,
-    required String nodeAId,
-    required String nodeBId,
-    double? distanceMeters,
-    int? steps,
-    double? averageHeading,
-    String? customInstruction,
-    List<Map<String, dynamic>>? confirmationObjects,
-  }) async {
-    try {
-      final String connectionId = uuid.v4();
-      final userId = currentUser?.id;
-
-      if (userId == null) {
-        throw Exception('User not authenticated');
-      }
-
-      await client.from('node_connections').insert({
-        'id': connectionId,
-        'map_id': mapId,
-        'node_a_id': nodeAId,
-        'node_b_id': nodeBId,
-        'distance_meters': distanceMeters,
-        'steps': steps,
-        'average_heading': averageHeading,
-        'custom_instruction': customInstruction,
-        'confirmation_objects': confirmationObjects != null
-            ? jsonEncode(confirmationObjects)
-            : null,
-        'created_at': DateTime.now().toIso8601String(),
-        'user_id': userId,
-      });
-      return connectionId;
-    } catch (e) {
-      print('Error creating node connection: $e');
-      throw Exception('Failed to create node connection: ${e.toString()}');
-    }
-  }
-
-  Future<bool> updateNodeConnection({
-    required String connectionId,
-    int? steps,
-    double? distanceMeters,
-    double? averageHeading,
-    List<Map<String, dynamic>>? confirmationObjects,
-  }) async {
-    try {
-      await client.from('node_connections').update({
-        'steps': steps,
-        'distance_meters': distanceMeters,
-        'average_heading': averageHeading,
-        'confirmation_objects': confirmationObjects != null
-            ? jsonEncode(confirmationObjects)
-            : null,
-      }).eq('id', connectionId);
-      return true;
-    } catch (e) {
-      print('Error updating node connection: $e');
-      return false;
-    }
-  }
-
-  Future<void> deleteNodeConnection(String connectionId) async {
-    try {
-      await client.from('node_connections').delete().eq('id', connectionId);
-    } catch (e) {
-      print('Error deleting node connection: $e');
-      throw Exception('Failed to delete node connection: ${e.toString()}');
     }
   }
 
@@ -1394,62 +1321,10 @@ class SupabaseService {
     try {
       final nodes =
           await client.from('map_nodes').select('*').eq('map_id', mapId);
-      final connections =
-          await client.from('node_connections').select('*').eq('map_id', mapId);
-      return {'nodes': nodes, 'connections': connections};
+      return {'nodes': nodes};
     } catch (e) {
       print('Error getting navigation data: $e');
       throw Exception('Failed to get navigation data: ${e.toString()}');
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> getWalkingSessions(String mapId) async {
-    try {
-      return await client
-          .from('walking_sessions')
-          .select('*')
-          .eq('map_id', mapId);
-    } catch (e) {
-      print('Error getting walking sessions: $e');
-      throw Exception('Failed to get walking sessions: ${e.toString()}');
-    }
-  }
-
-  Future<String> saveWalkingSession({
-    required String mapId,
-    required String startNodeId,
-    required String endNodeId,
-    required double distanceMeters,
-    required int stepCount,
-    required double averageHeading,
-    required String instruction,
-    required List<Map<String, dynamic>> detectedObjects,
-  }) async {
-    try {
-      final String sessionId = uuid.v4();
-      final userId = currentUser?.id;
-
-      if (userId == null) {
-        throw Exception('User not authenticated');
-      }
-
-      await client.from('walking_sessions').insert({
-        'id': sessionId,
-        'map_id': mapId,
-        'start_node_id': startNodeId,
-        'end_node_id': endNodeId,
-        'distance_meters': distanceMeters,
-        'step_count': stepCount,
-        'average_heading': averageHeading,
-        'instruction': instruction,
-        'detected_objects': jsonEncode(detectedObjects),
-        'created_at': DateTime.now().toIso8601String(),
-        'user_id': userId,
-      });
-      return sessionId;
-    } catch (e) {
-      print('Error saving walking session: $e');
-      throw Exception('Failed to save walking session: ${e.toString()}');
     }
   }
 
@@ -1481,15 +1356,15 @@ class SupabaseService {
       print('Session expires at: ${session.expiresAt}');
 
       // Debug: Check user authentication status in database
-      print('🔍 DEBUG: Checking user authentication status before save...');
+      print('DEBUG: Checking user authentication status before save...');
       final authStatus = await debugUserAuthStatus();
-      print('🔍 DEBUG: User auth status: $authStatus');
-      print('🔍 DEBUG: Auth status check complete');
+      print('DEBUG: User auth status: $authStatus');
+      print('DEBUG: Auth status check complete');
 
       // Ensure user profile exists before attempting to save
-      print('🔍 DEBUG: Ensuring user profile exists...');
+      print('DEBUG: Ensuring user profile exists...');
       await _ensureUserProfileExists(userId);
-      print('🔍 DEBUG: User profile check complete');
+      print('DEBUG: User profile check complete');
 
       // Get user's organization
       final userProfile = await client
@@ -1519,9 +1394,9 @@ class SupabaseService {
       // Insert the navigation path with explicit error handling
       try {
         await client.from('navigation_paths').insert(pathData);
-        print('✅ Navigation path saved with ID: ${navigationPath.id}');
+        print('Navigation path saved with ID: ${navigationPath.id}');
       } catch (insertError) {
-        print('❌ Insert error: $insertError');
+        print('Insert error: $insertError');
         if (insertError.toString().contains('violates row-level security policy')) {
           throw Exception('Authentication error: User ID mismatch with database session. Please sign out and sign in again.');
         }
@@ -1532,9 +1407,9 @@ class SupabaseService {
       if (navigationPath.waypoints.isNotEmpty) {
         final List<Map<String, dynamic>> waypointsData =
             navigationPath.waypoints.map((waypoint) {
-          // 🐛 DEBUG: Check waypoint people data before saving
+          // DEBUG: Check waypoint people data before saving
           print(
-              '🔍 DEBUG saving waypoint ${waypoint.sequenceNumber}: peopleDetected=${waypoint.peopleDetected}, count=${waypoint.peopleCount}');
+              'DEBUG saving waypoint ${waypoint.sequenceNumber}: peopleDetected=${waypoint.peopleDetected}, count=${waypoint.peopleCount}');
 
           return {
             'id': waypoint.id,
@@ -1645,7 +1520,7 @@ class SupabaseService {
       print('Current user ID: $userId');
 
       if (userId == null) {
-        print('❌ User not authenticated');
+        print('User not authenticated');
         throw Exception('User not authenticated');
       }
 
@@ -1663,8 +1538,8 @@ class SupabaseService {
       print('User is admin: $isAdminUser');
 
       if (userOrganizationId == null && !isAdminUser) {
-        print('⚠️ WARNING: User has no organization assigned and is not admin!');
-        print('⚠️ This means they can only see paths they created themselves');
+        print('WARNING: User has no organization assigned and is not admin!');
+        print('WARNING: This means they can only see paths they created themselves');
       }
 
       // Load navigation paths based on user role and organization
@@ -1679,7 +1554,7 @@ class SupabaseService {
               .select()
               .eq('organization_id', userOrganizationId)
               .order('created_at', ascending: false);
-          print('🔓 Admin user - filtering by organization: $userOrganizationId');
+          print('Admin user - filtering by organization: $userOrganizationId');
         } else {
           // Admin with no organization can only see their own paths
           pathsResponse = await client
@@ -1687,7 +1562,7 @@ class SupabaseService {
               .select()
               .eq('user_id', userId)
               .order('created_at', ascending: false);
-          print('🔓 Admin user (no organization) - filtering by user: $userId');
+          print('Admin user (no organization) - filtering by user: $userId');
         }
       } else {
         // Regular users can see paths from their organization
@@ -1697,7 +1572,7 @@ class SupabaseService {
               .select()
               .eq('organization_id', userOrganizationId)
               .order('created_at', ascending: false);
-          print('🔒 Regular user - filtering by organization: $userOrganizationId');
+          print('Regular user - filtering by organization: $userOrganizationId');
         } else {
           // Users without organization can only see their own paths
           pathsResponse = await client
@@ -1705,7 +1580,7 @@ class SupabaseService {
               .select()
               .eq('user_id', userId)
               .order('created_at', ascending: false);
-          print('🔒 Regular user (no organization) - filtering by user: $userId');
+          print('Regular user (no organization) - filtering by user: $userId');
         }
       }
 
@@ -1827,42 +1702,6 @@ class SupabaseService {
     } catch (e) {
       print('Error loading navigation paths: $e');
       return [];
-    }
-  }
-
-  Future<String> saveRecordedPath(Map<String, dynamic> pathData) async {
-    try {
-      final String pathId = uuid.v4();
-      final userId = currentUser?.id;
-
-      if (userId == null) {
-        throw Exception('User not authenticated');
-      }
-
-      // Get user's organization
-      final userProfile = await client
-          .from('profiles')
-          .select('organization_id')
-          .eq('id', userId)
-          .maybeSingle();
-
-      final userOrganizationId = userProfile?['organization_id'];
-
-      // Prepare the path data with additional fields
-      final Map<String, dynamic> completePathData = {
-        'id': pathId,
-        'user_id': userId,
-        'organization_id': userOrganizationId, // Add organization for sharing
-        'created_at': DateTime.now().toIso8601String(),
-        ...pathData, // Spread the provided path data
-      };
-
-      await client.from('recorded_paths').insert(completePathData);
-      print('Recorded path saved with ID: $pathId');
-      return pathId;
-    } catch (e) {
-      print('Error saving recorded path: $e');
-      throw Exception('Failed to save recorded path: ${e.toString()}');
     }
   }
 
@@ -2033,8 +1872,8 @@ class SupabaseService {
         throw Exception('User not found or update failed');
       }
 
-      // 🔧 CRITICAL: Update all existing content for this user
-      print('🔧 Updating existing content for user $userEmail with organization $organizationId...');
+      // CRITICAL: Update all existing content for this user
+      print('Updating existing content for user $userEmail with organization $organizationId...');
 
       // Update place_embeddings
       await client.rpc('exec_sql', params: {
@@ -2045,7 +1884,7 @@ class SupabaseService {
           AND organization_id IS NULL;
         '''
       });
-      print('✅ Updated place_embeddings for user $userId');
+      print('Updated place_embeddings for user $userId');
 
       // Update navigation_paths
       await client.rpc('exec_sql', params: {
@@ -2056,11 +1895,11 @@ class SupabaseService {
           AND organization_id IS NULL;
         '''
       });
-      print('✅ Updated navigation_paths for user $userId');
+      print('Updated navigation_paths for user $userId');
 
       // NOTE: path_waypoints table doesn't have organization_id column
       // Security is handled through navigation_paths foreign key relationship
-      print('📍 Skipping path_waypoints update (no organization_id column)');
+      print('NOTE: Skipping path_waypoints update (no organization_id column)');
 
       // Update map_nodes
       await client.rpc('exec_sql', params: {
@@ -2071,20 +1910,9 @@ class SupabaseService {
           AND organization_id IS NULL;
         '''
       });
-      print('✅ Updated map_nodes for user $userId');
+      print('Updated map_nodes for user $userId');
 
-      // Update recorded_paths
-      await client.rpc('exec_sql', params: {
-        'sql': '''
-          UPDATE recorded_paths
-          SET organization_id = '$organizationId'
-          WHERE user_id = '$userId'
-          AND organization_id IS NULL;
-        '''
-      });
-      print('✅ Updated recorded_paths for user $userId');
-
-      print('🎉 Successfully assigned user $userEmail to organization $organizationId and updated all existing content!');
+      print('Successfully assigned user $userEmail to organization $organizationId and updated all existing content!');
     } catch (e) {
       print('Error assigning user to organization: $e');
       throw Exception('Failed to assign user: ${e.toString()}');
@@ -2142,7 +1970,7 @@ class SupabaseService {
         }
       }
 
-      print('🔄 Removing user $userEmail from organization and clearing content...');
+      print('Removing user $userEmail from organization and clearing content...');
 
       // Clear organization_id from all user's content
       // Update place_embeddings
@@ -2153,7 +1981,7 @@ class SupabaseService {
           WHERE user_id = '$userId';
         '''
       });
-      print('✅ Cleared organization_id from place_embeddings for user $userId');
+      print('Cleared organization_id from place_embeddings for user $userId');
 
       // Update navigation_paths
       await client.rpc('exec_sql', params: {
@@ -2163,7 +1991,7 @@ class SupabaseService {
           WHERE user_id = '$userId';
         '''
       });
-      print('✅ Cleared organization_id from navigation_paths for user $userId');
+      print('Cleared organization_id from navigation_paths for user $userId');
 
       // Update map_nodes
       await client.rpc('exec_sql', params: {
@@ -2173,17 +2001,7 @@ class SupabaseService {
           WHERE user_id = '$userId';
         '''
       });
-      print('✅ Cleared organization_id from map_nodes for user $userId');
-
-      // Update recorded_paths
-      await client.rpc('exec_sql', params: {
-        'sql': '''
-          UPDATE recorded_paths
-          SET organization_id = NULL
-          WHERE user_id = '$userId';
-        '''
-      });
-      print('✅ Cleared organization_id from recorded_paths for user $userId');
+      print('Cleared organization_id from map_nodes for user $userId');
 
       // Finally, remove organization assignment from user profile
       final response = await client
@@ -2197,7 +2015,7 @@ class SupabaseService {
         throw Exception('User not found or update failed');
       }
 
-      print('🎉 Successfully removed user $userEmail from organization and cleared all content organization_id');
+      print('Successfully removed user $userEmail from organization and cleared all content organization_id');
     } catch (e) {
       print('Error removing user from organization: $e');
       throw Exception('Failed to remove user: ${e.toString()}');
@@ -2237,7 +2055,7 @@ class SupabaseService {
         throw Exception('Access denied: You can only delete organizations you created. This organization was created by another admin.');
       }
 
-      print('🗑️ Deleting organization "$orgName" ($organizationId) and cleaning up all associated data...');
+      print('Deleting organization "$orgName" ($organizationId) and cleaning up all associated data...');
 
       // First, get all users in this organization
       final usersResponse = await client
@@ -2252,7 +2070,7 @@ class SupabaseService {
         final userId = user['id'];
         final userEmail = user['email'];
 
-        print('🔄 Cleaning up content for user $userEmail...');
+        print('Cleaning up content for user $userEmail...');
 
         // Clear organization_id from all user's content
         await client.rpc('exec_sql', params: {
@@ -2278,14 +2096,6 @@ class SupabaseService {
             WHERE user_id = '$userId';
           '''
         });
-
-        await client.rpc('exec_sql', params: {
-          'sql': '''
-            UPDATE recorded_paths
-            SET organization_id = NULL
-            WHERE user_id = '$userId';
-          '''
-        });
       }
 
       // Clear organization_id from all user profiles
@@ -2296,7 +2106,7 @@ class SupabaseService {
           WHERE organization_id = '$organizationId';
         '''
       });
-      print('✅ Cleared organization_id from all user profiles');
+      print('Cleared organization_id from all user profiles');
 
       // Finally, delete the organization
       final deleteResponse = await client

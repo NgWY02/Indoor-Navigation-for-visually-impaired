@@ -6,7 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:video_thumbnail/video_thumbnail.dart' as thumb;
 import 'package:flutter_compass/flutter_compass.dart';
 import '../services/supabase_service.dart';
-import '../services/clip_service.dart';
+import 'dinov2_service.dart';
 
 class VideoProcessorService {
   final SupabaseService _supabaseService;

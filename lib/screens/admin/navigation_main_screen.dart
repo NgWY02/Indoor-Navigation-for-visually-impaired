@@ -5,7 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import '../../services/clip_service.dart';
+import '../../services/dinov2_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/position_localization_service.dart';
 import '../../services/real_time_navigation_service.dart' as nav_service;
@@ -507,6 +507,10 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
         !_cameraController!.value.isInitialized ||
         _screenState != NavigationScreenState.navigating ||
         _isTakingPicture) {  // ✅ Only check camera access, not recovery processing
+      // Debug camera readiness for voice navigation troubleshooting
+      if (_screenState == NavigationScreenState.navigating) {
+        print('🎯 Frame processing skipped - ADMIN: camera=${_cameraController != null}, initialized=${_cameraController?.value.isInitialized}, processing=$_isProcessingFrame, taking=$_isTakingPicture');
+      }
       return;
     }
 
@@ -570,14 +574,21 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
           _isTakingPicture = false;  // Reset camera state
 
           // Ensure screen is in navigating state for voice-activated navigation
-          if (_screenState != NavigationScreenState.navigating) {
-            _screenState = NavigationScreenState.navigating;
-            // Start frame processing timer if not already running (for voice navigation)
-            if (_frameProcessingTimer == null || !_frameProcessingTimer!.isActive) {
-              _frameProcessingTimer = Timer.periodic(Duration(seconds: 1), (_) {
-                _processNavigationFrame();
-              });
-            }
+          _screenState = NavigationScreenState.navigating;
+          
+          // CRITICAL FIX: Always start frame processing timer when entering actual navigation
+          // This fixes the issue where voice-initiated navigation doesn't work after orientation
+          if (_frameProcessingTimer == null || !_frameProcessingTimer!.isActive) {
+            print('🎯 Starting frame processing timer for navigation (voice or manual) - ADMIN');
+            _frameProcessingTimer = Timer.periodic(Duration(seconds: 1), (_) {
+              _processNavigationFrame();
+            });
+          }
+          
+          // Ensure camera is ready for voice-initiated navigation
+          if (!_isCameraInitialized) {
+            print('🎥 Camera not ready during voice navigation - reinitializing... - ADMIN');
+            _initializeCamera();
           }
           break;
         case nav_service.NavigationState.idle:
@@ -587,6 +598,11 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
           _recoveryFrameCount = 0;
           _isCapturingRecoveryFrame = false;
           _isTakingPicture = false;  // Reset camera state
+          
+          // Stop frame processing timer when navigation ends
+          _frameProcessingTimer?.cancel();
+          _frameProcessingTimer = null;
+          print('🛑 Frame processing timer stopped - navigation ended - ADMIN');
           break;
         default:
           break;
@@ -1635,7 +1651,7 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
           _showLocalizationResult = true;
 
           // Store result for voice assistant explanations
-          _voiceAssistant?.updateLastLocalizationResult({
+          _voiceAssistant.updateLastLocalizationResult({
             'detectedLocation': result.detectedLocation,
             'nodeId': result.nodeId,
             'confidence': result.confidence,
@@ -1754,6 +1770,11 @@ class _NavigationMainScreenState extends State<NavigationMainScreen>
 
   Future<void> _stopAndReturnToMain() async {
     await _navigationService.stopNavigation();
+    
+    // Ensure frame processing timer is stopped
+    _frameProcessingTimer?.cancel();
+    _frameProcessingTimer = null;
+    
     setState(() {
       _screenState = NavigationScreenState.readyToLocalize;
       _selectedRoute = null;

@@ -5,7 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-import '../../services/clip_service.dart';
+import '../../services/dinov2_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/position_localization_service.dart';
 import '../../services/real_time_navigation_service.dart' as nav_service;

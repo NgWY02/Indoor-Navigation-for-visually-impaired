@@ -6,7 +6,7 @@ import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../services/supabase_service.dart';
-import '../../services/clip_service.dart';
+import '../../services/dinov2_service.dart';
 import '../../services/continuous_path_recorder.dart';
 import '../../models/path_models.dart';
 import 'package:uuid/uuid.dart';

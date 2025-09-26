@@ -10,7 +10,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'clip_service.dart';
+import 'dinov2_service.dart';
 import 'gpt_service.dart';
 import 'supabase_service.dart';
 import 'real_time_navigation_service.dart';
@@ -124,11 +124,11 @@ class VoiceAssistantService {
       await _initializeSpeechToText();
       await _initializePorcupine();
       
-      debugPrint('✅ Voice Assistant initialized successfully');
+      debugPrint('Voice Assistant initialized successfully');
       return true;
       
     } catch (e) {
-      debugPrint('❌ Voice Assistant initialization failed: $e');
+      debugPrint('Voice Assistant initialization failed: $e');
       onError?.call('Failed to initialize voice assistant: $e');
       return false;
     }
@@ -141,15 +141,15 @@ class VoiceAssistantService {
       _picovoiceAccessKey = 'AVSvkwsR0pxY0l+huQ8+2DSiDpDW/0vhy4TolkK8XIUq3BpQEGLUbA==';
       
       if (_gptApiKey == null || _gptApiKey!.isEmpty) {
-        debugPrint('⚠️ OpenAI API key not found in .env file');
+        debugPrint('OpenAI API key not found in .env file');
       } else {
-        debugPrint('✅ OpenAI API key loaded');
+        debugPrint('OpenAI API key loaded');
       }
       
-      debugPrint('✅ Picovoice access key configured');
+      debugPrint('Picovoice access key configured');
       
     } catch (e) {
-      debugPrint('⚠️ Error loading API keys: $e');
+      debugPrint('Error loading API keys: $e');
     }
   }
 
@@ -168,9 +168,9 @@ class VoiceAssistantService {
         }
       });
       
-      debugPrint('✅ TTS initialized');
+      debugPrint('TTS initialized');
     } catch (e) {
-      debugPrint('❌ TTS initialization failed: $e');
+      debugPrint('TTS initialization failed: $e');
       throw e;
     }
   }
@@ -181,18 +181,18 @@ class VoiceAssistantService {
       // Configure speech recognition options
       bool available = await _speechToText.initialize(
         onError: (errorNotification) {
-          debugPrint('❌ STT Error: ${errorNotification.errorMsg}');
+          debugPrint('STT Error: ${errorNotification.errorMsg}');
           // Handle specific error types
           if (errorNotification.errorMsg == 'error_language_unavailable') {
-            debugPrint('🌐 Language not available, will use device default');
+            debugPrint('Language not available, will use device default');
             onError?.call('Speech recognition language not available. Using device default language.');
             _updateState(VoiceSessionState.idle);
           } else if (errorNotification.errorMsg == 'error_network' ||
               errorNotification.errorMsg == 'error_network_timeout') {
-            debugPrint('🔄 Network error detected, retry count: $_retryCount');
+            debugPrint('Network error detected, retry count: $_retryCount');
             if (_retryCount < MAX_RETRY_ATTEMPTS) {
               _retryCount++;
-              debugPrint('🔄 Retrying speech recognition (attempt $_retryCount)');
+              debugPrint('Retrying speech recognition (attempt $_retryCount)');
               onError?.call('Network issue detected. Retrying speech recognition...');
               // Retry after a short delay
               Future.delayed(Duration(seconds: 2), () {
@@ -206,7 +206,7 @@ class VoiceAssistantService {
               _updateState(VoiceSessionState.idle);
             }
           } else if (errorNotification.errorMsg == 'error_speech_timeout') {
-            debugPrint('⏰ Speech timeout - possible causes:');
+            debugPrint('Speech timeout - possible causes:');
             debugPrint('  - No speech detected (speak louder/clearer)');
             debugPrint('  - Microphone muted or not working');
             debugPrint('  - Another app using microphone');
@@ -217,13 +217,13 @@ class VoiceAssistantService {
             // Restart Porcupine after timeout
             _restartPorcupine();
           } else if (errorNotification.errorMsg == 'error_busy') {
-            debugPrint('📱 Speech recognition busy - another app may be using it');
+            debugPrint('Speech recognition busy - another app may be using it');
             onError?.call('Speech recognition is busy. Please close other apps that might be using the microphone.');
             _updateState(VoiceSessionState.idle);
             // Restart Porcupine after busy error
             _restartPorcupine();
           } else if (errorNotification.errorMsg == 'error_no_match') {
-            debugPrint('🎤 Speech detected but no match found');
+            debugPrint('Speech detected but no match found');
             onError?.call('Speech was detected but couldn\'t be understood. Please try again.');
             _updateState(VoiceSessionState.idle);
             // Restart Porcupine after no match
@@ -237,7 +237,7 @@ class VoiceAssistantService {
           }
         },
         onStatus: (status) {
-          debugPrint('🎤 STT Status: $status');
+          debugPrint('STT Status: $status');
         },
       );
 
@@ -245,9 +245,9 @@ class VoiceAssistantService {
         throw Exception('Speech recognition not available on this device');
       }
 
-      debugPrint('✅ Speech-to-Text initialized');
+      debugPrint('Speech-to-Text initialized');
     } catch (e) {
-      debugPrint('❌ STT initialization failed: $e');
+      debugPrint('STT initialization failed: $e');
       throw Exception('Failed to initialize speech recognition: $e');
     }
   }
@@ -264,23 +264,23 @@ class VoiceAssistantService {
         ['assets/wakeword.ppn'], // Custom "Hey Navi" wake word
         _onWakeWordDetected,
         errorCallback: (error) {
-          debugPrint('❌ Porcupine Error: ${error.message}');
+          debugPrint('Porcupine Error: ${error.message}');
           onError?.call('Wake word detection error: ${error.message}');
         },
       );
       
       await _porcupineManager!.start();
-      debugPrint('✅ Porcupine wake word detection started');
+      debugPrint('Porcupine wake word detection started');
       
     } catch (e) {
-      debugPrint('❌ Porcupine initialization failed: $e');
+      debugPrint('Porcupine initialization failed: $e');
       throw e;
     }
   }
 
   /// Wake word detected callback
   void _onWakeWordDetected(int keywordIndex) {
-    debugPrint('🎤 Wake word "Hey Navi" detected!');
+    debugPrint('Wake word "Hey Navi" detected!');
 
     // Provide haptic feedback
     HapticFeedback.lightImpact();
@@ -308,7 +308,7 @@ class VoiceAssistantService {
       final result = await connectivity.checkConnectivity();
       return result != ConnectivityResult.none;
     } catch (e) {
-      debugPrint('⚠️ Connectivity check failed: $e');
+      debugPrint('Connectivity check failed: $e');
       // Assume connected if check fails
       return true;
     }
@@ -319,21 +319,21 @@ class VoiceAssistantService {
     try {
       final status = await Permission.microphone.status;
       if (status.isGranted) {
-        debugPrint('✅ Microphone permission granted');
+        debugPrint('Microphone permission granted');
         return true;
       } else if (status.isDenied) {
-        debugPrint('❌ Microphone permission denied');
+        debugPrint('Microphone permission denied');
         // Try to request permission
         final result = await Permission.microphone.request();
         return result.isGranted;
       } else if (status.isPermanentlyDenied) {
-        debugPrint('🚫 Microphone permission permanently denied');
+        debugPrint('Microphone permission permanently denied');
         onError?.call('Microphone permission is required for voice assistant. Please enable it in app settings.');
         return false;
       }
       return false;
     } catch (e) {
-      debugPrint('⚠️ Microphone permission check failed: $e');
+      debugPrint('Microphone permission check failed: $e');
       return false;
     }
   }
@@ -342,11 +342,11 @@ class VoiceAssistantService {
   Future<void> _stopPorcupineTemporarily() async {
     if (_porcupineManager != null) {
       try {
-        debugPrint('⏸️ Temporarily stopping Porcupine for speech recognition');
+        debugPrint('Temporarily stopping Porcupine for speech recognition');
         await _porcupineManager!.stop();
-        debugPrint('✅ Porcupine stopped');
+        debugPrint('Porcupine stopped');
       } catch (e) {
-        debugPrint('⚠️ Failed to stop Porcupine: $e');
+        debugPrint('Failed to stop Porcupine: $e');
       }
     }
   }
@@ -357,11 +357,11 @@ class VoiceAssistantService {
       try {
         // Small delay to ensure speech recognition has fully stopped
         await Future.delayed(Duration(milliseconds: 500));
-        debugPrint('▶️ Restarting Porcupine wake word detection');
+        debugPrint('Restarting Porcupine wake word detection');
         await _porcupineManager!.start();
-        debugPrint('✅ Porcupine restarted');
+        debugPrint('Porcupine restarted');
       } catch (e) {
-        debugPrint('⚠️ Failed to restart Porcupine: $e');
+        debugPrint('Failed to restart Porcupine: $e');
       }
     }
   }
@@ -369,7 +369,7 @@ class VoiceAssistantService {
   /// Start listening for user speech
   Future<void> _startListening() async {
     if (!_speechToText.isAvailable) {
-      debugPrint('❌ Speech recognition not available');
+      debugPrint('Speech recognition not available');
       onError?.call('Speech recognition not available on this device');
       return;
     }
@@ -377,7 +377,7 @@ class VoiceAssistantService {
     // Check microphone permission
     final hasMicPermission = await _checkMicrophonePermission();
     if (!hasMicPermission) {
-      debugPrint('❌ Microphone permission not granted');
+      debugPrint('Microphone permission not granted');
       onError?.call('Microphone permission required for voice assistant');
       _updateState(VoiceSessionState.idle);
       return;
@@ -386,16 +386,16 @@ class VoiceAssistantService {
     // Check connectivity before starting speech recognition
     final hasConnectivity = await _checkConnectivity();
     if (!hasConnectivity) {
-      debugPrint('⚠️ No network connectivity detected');
+      debugPrint('No network connectivity detected');
       onError?.call('No internet connection. Speech recognition may not work properly.');
     }
 
     // Check if microphone is available
     try {
       // You can add microphone availability check here if needed
-      debugPrint('🎤 Checking microphone availability...');
+      debugPrint('Checking microphone availability...');
     } catch (e) {
-      debugPrint('⚠️ Microphone check failed: $e');
+      debugPrint('Microphone check failed: $e');
     }
 
     try {
@@ -403,7 +403,7 @@ class VoiceAssistantService {
       _currentListenText = '';
       _retryCount = 0; // Reset retry count on successful start
 
-      debugPrint('🎤 Initializing speech recognition with timeout: ${LISTENING_TIMEOUT}s');
+      debugPrint('Initializing speech recognition with timeout: ${LISTENING_TIMEOUT}s');
 
       await _speechToText.listen(
         onResult: _onSpeechResult,
@@ -413,10 +413,10 @@ class VoiceAssistantService {
         cancelOnError: false, // Let error handler manage instead of canceling
       );
 
-      debugPrint('🎤 Started listening...');
+      debugPrint('Started listening...');
 
     } catch (e) {
-      debugPrint('❌ Failed to start listening: $e');
+      debugPrint('Failed to start listening: $e');
       onError?.call('Failed to start listening. Please check microphone permissions.');
       _updateState(VoiceSessionState.error);
     }
@@ -428,7 +428,7 @@ class VoiceAssistantService {
     onTranscriptUpdate?.call(_currentListenText ?? '');
 
     if (result.finalResult) {
-      debugPrint('🎤 Final transcript: $_currentListenText');
+      debugPrint('Final transcript: $_currentListenText');
       _processVoiceCommand(_currentListenText ?? '').then((_) {
         // Restart Porcupine after processing command
         _restartPorcupine();
@@ -456,7 +456,7 @@ class VoiceAssistantService {
       await _executeCommand(command);
       
     } catch (e) {
-      debugPrint('❌ Command processing failed: $e');
+      debugPrint('Command processing failed: $e');
       speak('Sorry, I couldn\'t process that command.');
       _updateState(VoiceSessionState.idle);
     }
@@ -520,18 +520,18 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
         final content = responseData['choices'][0]['message']['content'];
-        debugPrint('🎤 GPT Raw Response: $content');
+        debugPrint('GPT Raw Response: $content');
 
         // Parse GPT response
         final commandData = json.decode(content);
         final intentString = commandData['intent'];
         final mappedIntent = _stringToIntent(intentString);
 
-        debugPrint('🎤 GPT Intent: "$intentString" → Mapped to: ${mappedIntent.toString()}');
+        debugPrint('GPT Intent: "$intentString" → Mapped to: ${mappedIntent.toString()}');
 
         // If GPT returned unknown intent, fall back to simple parsing
         if (mappedIntent == VoiceIntent.unknown) {
-          debugPrint('🎤 GPT returned unknown intent, falling back to simple parsing');
+          debugPrint('GPT returned unknown intent, falling back to simple parsing');
           return _parseCommandSimple(transcript);
         }
 
@@ -727,7 +727,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
           break;
       }
         } catch (e) {
-          debugPrint('❌ Command execution failed: $e');
+          debugPrint('Command execution failed: $e');
           speak('Sorry, I couldn\'t complete that action.');
       _updateState(VoiceSessionState.idle);
     }
@@ -743,14 +743,14 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
 
     try {
       speak('Starting localization. Please hold still and scan your surroundings.');
-      debugPrint('🎤 Sending "Enhanced localization requested" to navigation screen');
+      debugPrint('Sending "Enhanced localization requested" to navigation screen');
 
       // Notify the calling screen to start enhanced localization
       onStatusUpdate?.call('Enhanced localization requested');
 
       _updateState(VoiceSessionState.idle);
     } catch (e) {
-      debugPrint('❌ Localization execution failed: $e');
+      debugPrint('Localization execution failed: $e');
       speak('Failed to start location detection.');
       _updateState(VoiceSessionState.idle);
     }
@@ -765,7 +765,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
     }
 
     // Check if we know current location
-    debugPrint('🎤 Current localization result: $_lastLocalizationResult');
+    debugPrint('Current localization result: $_lastLocalizationResult');
     if (_lastLocalizationResult == null || _lastLocalizationResult!['nodeId'] == null) {
       speak('I don\'t know your current location. Please say "find my location" to scan and find your location first.');
       _updateState(VoiceSessionState.idle);
@@ -777,7 +777,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
     try {
       final currentNodeId = _lastLocalizationResult!['nodeId'];
       final currentLocation = _lastLocalizationResult!['detectedLocation'];
-      debugPrint('🎤 Current location: $currentLocation (nodeId: $currentNodeId)');
+      debugPrint('Current location: $currentLocation (nodeId: $currentNodeId)');
 
       // Load all available routes from current location
       final allRoutes = await _supabaseService?.loadAllPaths();
@@ -789,37 +789,37 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
 
       // Find route that starts from current location and goes to destination
       NavigationRoute? matchingRoute;
-      debugPrint('🎤 Looking for route from $currentNodeId to destination "$destination"');
+      debugPrint('Looking for route from $currentNodeId to destination "$destination"');
       for (final path in allRoutes) {
-        debugPrint('🎤 Checking path: ${path.name} (start: ${path.startLocationId}, end: ${path.endLocationId})');
+        debugPrint('Checking path: ${path.name} (start: ${path.startLocationId}, end: ${path.endLocationId})');
         // Check if path starts from current location
         if (path.startLocationId == currentNodeId) {
-          debugPrint('🎤 Path starts from current location ✅');
+          debugPrint('Path starts from current location ✅');
           // Get the end location name
           final endLocationName = await _getNodeName(path.endLocationId);
-          debugPrint('🎤 End location name: "$endLocationName"');
+          debugPrint('End location name: "$endLocationName"');
 
           // Check if destination matches end location name (case insensitive)
           final destLower = destination.toLowerCase();
           final endLower = endLocationName.toLowerCase();
-          debugPrint('🎤 Checking if "$endLower" contains "$destLower" or vice versa');
+          debugPrint('Checking if "$endLower" contains "$destLower" or vice versa');
 
           if (endLower.contains(destLower) || destLower.contains(endLower)) {
-            debugPrint('🎤 Route match found! ✅');
+            debugPrint('Route match found! ✅');
             // Get full route details
             final routeDetails = await _getRouteDetails(path);
             if (routeDetails != null) {
               matchingRoute = routeDetails;
-              debugPrint('🎤 Route details created successfully');
+              debugPrint('Route details created successfully');
               break;
             } else {
-              debugPrint('🎤 Failed to create route details');
+              debugPrint('Failed to create route details');
             }
           } else {
-            debugPrint('🎤 No match for this route');
+            debugPrint('No match for this route');
           }
         } else {
-          debugPrint('🎤 Path does not start from current location');
+          debugPrint('Path does not start from current location');
         }
       }
 
@@ -830,14 +830,14 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
       }
 
       // Start navigation
-      debugPrint('🎤 Starting navigation to ${matchingRoute.endNodeName}');
+      debugPrint('Starting navigation to ${matchingRoute.endNodeName}');
       onStatusUpdate?.call('Starting navigation to $destination');
       speak('Starting navigation to ${matchingRoute.endNodeName}. Follow the audio instructions.');
 
       // Start navigation using the navigation service
-      debugPrint('🎤 Calling _navigationService.startNavigation()');
+      debugPrint('Calling _navigationService.startNavigation()');
       await _navigationService?.startNavigation(matchingRoute);
-      debugPrint('🎤 Navigation service startNavigation() completed');
+      debugPrint('Navigation service startNavigation() completed');
 
       onStatusUpdate?.call('Navigation started');
       _updateState(VoiceSessionState.idle);
@@ -1019,7 +1019,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
       _updateState(VoiceSessionState.idle);
 
     } catch (e) {
-      debugPrint('❌ List routes execution failed: $e');
+      debugPrint('List routes execution failed: $e');
       speak('I\'m having trouble retrieving the list of navigation routes. Please try again.');
       _updateState(VoiceSessionState.idle);
     }
@@ -1048,7 +1048,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
       onResponse?.call(text);
       await _flutterTts.speak(text);
     } catch (e) {
-      debugPrint('❌ TTS failed: $e');
+      debugPrint('TTS failed: $e');
       _updateState(VoiceSessionState.idle);
     }
   }
@@ -1058,7 +1058,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
     if (_sessionState != newState) {
       _sessionState = newState;
       onStateChanged?.call(_sessionState);
-      debugPrint('🎤 Voice Assistant State: ${_sessionState.toString()}');
+      debugPrint('Voice Assistant State: ${_sessionState.toString()}');
     }
   }
 
@@ -1068,9 +1068,9 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
       await _porcupineManager?.delete();
       await _speechToText.stop();
       await _flutterTts.stop();
-      debugPrint('✅ Voice Assistant disposed');
+      debugPrint('Voice Assistant disposed');
     } catch (e) {
-      debugPrint('❌ Voice Assistant disposal error: $e');
+      debugPrint('Voice Assistant disposal error: $e');
     }
   }
 
@@ -1084,7 +1084,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
   /// Manually test voice recognition (for debugging)
   Future<void> testVoiceRecognition() async {
     try {
-      debugPrint('🧪 Starting voice recognition test...');
+      debugPrint('Starting voice recognition test...');
 
       // Test microphone first
       final micTest = await testMicrophone();
@@ -1122,25 +1122,25 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
   /// Test microphone functionality
   Future<bool> testMicrophone() async {
     try {
-      debugPrint('🧪 Testing microphone functionality...');
+      debugPrint('Testing microphone functionality...');
 
       // Check permission first
       final hasPermission = await _checkMicrophonePermission();
       if (!hasPermission) {
-        debugPrint('❌ Microphone test failed: No permission');
+        debugPrint('Microphone test failed: No permission');
         return false;
       }
 
       // Check if speech recognition is available
       if (!_speechToText.isAvailable) {
-        debugPrint('❌ Microphone test failed: Speech recognition not available');
+        debugPrint('Microphone test failed: Speech recognition not available');
         return false;
       }
 
       debugPrint('✅ Microphone test passed');
       return true;
     } catch (e) {
-      debugPrint('❌ Microphone test failed: $e');
+      debugPrint('Microphone test failed: $e');
       return false;
     }
   }
@@ -1148,7 +1148,7 @@ Return ONLY valid JSON: {"intent": "exact phrase from examples", "parameters": {
   /// Store the last successful localization result for explanation
   void updateLastLocalizationResult(Map<String, dynamic> result) {
     _lastLocalizationResult = result;
-    debugPrint('📍 Updated last localization result: ${result['detectedLocation']}');
+    debugPrint('Updated last localization result: ${result['detectedLocation']}');
   }
 
   /// Get available voice commands

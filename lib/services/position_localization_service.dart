@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import '../services/clip_service.dart';
+import '../services/dinov2_service.dart';
 import '../services/supabase_service.dart';
 import '../models/path_models.dart';
 
@@ -30,8 +30,8 @@ class PositionLocalizationService {
   
   // People detection and inpainting thresholds for localization
   static const double _cleanSceneThreshold = 0.85;  // For clean-to-clean comparisons
-  static const double _peoplePresentThreshold = 0.75;  // For scenes with people
-  static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
+  static const double _peoplePresentThreshold = 0.84;  // For scenes with people 
+  static const double _crowdedSceneThreshold = 0.75;  // For crowded scenes 
   
   // State
   List<List<double>> _capturedEmbeddings = [];
@@ -86,9 +86,9 @@ class PositionLocalizationService {
       
       final currentEmbedding = navigationResult.embedding;
       
-      print('🎯 Localization: People detected: ${navigationResult.peopleDetected ? 'YES (${navigationResult.peopleCount})' : 'NO'}');
-      print('🎨 Localization: Inpainting: ${navigationResult.peopleDetected ? 'Applied (people removed)' : 'Not needed'}');
-      print('🎯 Localization: Dynamic threshold: ${navigationResult.recommendedThreshold.toStringAsFixed(2)}');
+      print('Localization: People detected: ${navigationResult.peopleDetected ? 'YES (${navigationResult.peopleCount})' : 'NO'}');
+      print('Localization: Inpainting: ${navigationResult.peopleDetected ? 'Applied (people removed)' : 'Not needed'}');
+      print('Localization: Dynamic threshold: ${navigationResult.recommendedThreshold.toStringAsFixed(2)}');
       
       // Get all available nodes with embeddings from database
       final allNodes = await _getAllNodesWithEmbeddings();

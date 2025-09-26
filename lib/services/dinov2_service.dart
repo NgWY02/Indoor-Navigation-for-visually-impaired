@@ -7,8 +7,8 @@ import '../models/path_models.dart';
 import 'supabase_service.dart';
 import 'gpt_service.dart';
 
-class ClipService {
-  static const String _defaultServerUrl = 'http://172.16.38.229:8000'; 
+class ClipService {  //lazy to change to dinov2. its actually using dinov2 instead of clip
+  static const String _defaultServerUrl = 'http://192.168.0.105:8000'; 
   final String serverUrl;
   
   // Performance optimization: Cache reference images
@@ -385,7 +385,7 @@ class ClipService {
   }) async {
     try {
       onStatusUpdate('Starting 8-second automated scan...');
-      debugPrint('🎯 Enhanced Localization: YOLO Detection ${disableYolo ? 'DISABLED' : 'ENABLED'}');
+      debugPrint('Enhanced Localization: YOLO Detection ${disableYolo ? 'DISABLED' : 'ENABLED'}');
       
       final capturedFrames = <CapturedFrame>[];
       
@@ -476,8 +476,6 @@ class ClipService {
         verificationResults.addAll(batchResults);
 
         debugPrint('✅ Batch VLM verification completed: ${batchResults.length} results from 1 API call');
-
-        // Note: No delay needed since it's one API call instead of multiple
       }
       
       // Apply decision logic
@@ -532,7 +530,7 @@ class ClipService {
             bestMatch = EmbeddingMatch(
               placeName: embeddingInfo.placeName,
               similarity: similarity,
-              embeddingId: embeddingId, // Use embedding_id for precise reference image linking!
+              embeddingId: embeddingId, 
               nodeId: embeddingInfo.nodeId,
               organizationId: embeddingInfo.organizationId,
             );
@@ -597,7 +595,7 @@ class ClipService {
               // Already a list, just convert to List<double>
               embedding = List<double>.from(embeddingData);
             } else {
-              debugPrint('⚠️ Unknown embedding data type: ${embeddingData.runtimeType}');
+              debugPrint('Unknown embedding data type: ${embeddingData.runtimeType}');
               continue;
             }
             
@@ -609,10 +607,10 @@ class ClipService {
               organizationId: row['organization_id'] as String?,
             );
             
-            debugPrint('✅ Processed embedding $embeddingId: ${placeName} (${embedding.length}D)');
+            debugPrint('Processed embedding $embeddingId: ${placeName} (${embedding.length}D)');
             
           } catch (e) {
-            debugPrint('❌ Error processing embedding for $embeddingId: $e');
+            debugPrint('Error processing embedding for $embeddingId: $e');
             continue;
           }
         }
@@ -647,10 +645,10 @@ class ClipService {
       // Cache the URL
       _referenceImageCache[embeddingId] = url;
       
-      debugPrint('✅ Found reference image for embedding $embeddingId');
+      debugPrint('Found reference image for embedding $embeddingId');
       return url;
     } catch (e) {
-      debugPrint('❌ Could not get reference image URL for embedding $embeddingId: $e');
+      debugPrint('Could not get reference image URL for embedding $embeddingId: $e');
       return null;
     }
   }
@@ -757,8 +755,6 @@ class ClipService {
     return (embeddingSimilarity * 0.6) + (vlmConfidence * 0.4);
   }
   
-  /// Convenience method for integration with navigation screens
-  /// Easy-to-use wrapper that handles the full enhanced localization flow
   Future<String> performQuickLocalization({
     required CameraController cameraController,
     Function(String)? onStatusUpdate,

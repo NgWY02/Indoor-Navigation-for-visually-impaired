@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import '../services/clip_service.dart';
+import 'dinov2_service.dart';
 import '../models/path_models.dart';
 import 'package:uuid/uuid.dart';
 
@@ -96,7 +96,7 @@ class ContinuousPathRecorder {
     try {
       _currentPathId = pathId;
       _isRecording = true;
-      _processingCancelled = false; // Reset cancellation flag
+      _processingCancelled = false; 
       _waypoints.clear();
       _rawWaypoints.clear();
       _sequenceNumber = 0;
@@ -107,14 +107,12 @@ class ContinuousPathRecorder {
       
       // Start periodic recording
       _recordingTimer = Timer.periodic(_captureInterval, (timer) {
-        //ROBUST CHECK: Cancel timer immediately if not recording
         if (!_isRecording) {
           print('Timer detected recording stopped - cancelling');
           timer.cancel();
           return;
         }
         
-        //ASYNC SAFETY: Don't await to prevent blocking timer, but handle errors
         _captureWaypoint().catchError((error) {
           print('Error during waypoint capture: $error');
           // Don't stop recording for individual waypoint errors

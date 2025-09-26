@@ -5,16 +5,6 @@ import 'supabase_service.dart';
 /// Helper service for managing reference images for VLM verification
 class ReferenceImageHelper {
   static final SupabaseService _supabase = SupabaseService();
-  
-  /// Upload a reference image for a specific node
-  /// 
-  /// Example usage:
-  /// ```dart
-  /// await ReferenceImageHelper.uploadReferenceImage(
-  ///   nodeId: "node-uuid-12345",
-  ///   imageFile: File('path/to/reference/image.jpg'),
-  /// );
-  /// ```
   static Future<String?> uploadReferenceImage({
     required String nodeId,
     required File imageFile,
@@ -36,25 +26,15 @@ class ReferenceImageHelper {
           .from('reference-images')
           .getPublicUrl(fileName);
       
-      debugPrint('✅ Reference image uploaded for node $nodeId: $url');
+      debugPrint('Reference image uploaded for node $nodeId: $url');
       return url;
       
     } catch (e) {
-      debugPrint('❌ Failed to upload reference image for node $nodeId: $e');
+      debugPrint('Failed to upload reference image for node $nodeId: $e');
       return null;
     }
   }
   
-  /// Upload multiple reference images at once
-  /// 
-  /// Example usage:
-  /// ```dart
-  /// await ReferenceImageHelper.uploadBatchReferenceImages({
-  ///   "node-uuid-entrance": File('entrance.jpg'),
-  ///   "node-uuid-library": File('library.jpg'),  
-  ///   "node-uuid-cafeteria": File('cafeteria.jpg'),
-  /// });
-  /// ```
   static Future<Map<String, String?>> uploadBatchReferenceImages(
     Map<String, File> nodeImageMap,
   ) async {
@@ -78,7 +58,7 @@ class ReferenceImageHelper {
     }
     
     final successCount = results.values.where((url) => url != null).length;
-    debugPrint('✅ Batch upload complete: $successCount/${nodeImageMap.length} successful');
+    debugPrint('Batch upload complete: $successCount/${nodeImageMap.length} successful');
     
     return results;
   }
@@ -146,7 +126,6 @@ class ReferenceImageHelper {
               'fileName': file.name,
             });
           } catch (e) {
-            // If we can't get place name, still include the node
             results.add({
               'nodeId': nodeId,
               'placeName': 'Unknown Place',

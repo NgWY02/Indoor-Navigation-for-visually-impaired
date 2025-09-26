@@ -40,7 +40,7 @@ class GPTService {
         return [];
       }
 
-      debugPrint('🧠 Starting batch VLM verification for ${imagePairs.length} image pairs...');
+      debugPrint('Starting batch VLM verification for ${imagePairs.length} image pairs...');
 
       // Build the content array with alternating captured and reference images
       final List<dynamic> content = [
@@ -97,7 +97,7 @@ class GPTService {
               'content': content,
             },
           ],
-          'max_completion_tokens': 1200, // Increased for multiple results
+          'max_completion_tokens': 1200, 
         }),
       );
 
@@ -131,7 +131,7 @@ class GPTService {
             cleanContent = jsonMatch.group(0)!;
           }
 
-          debugPrint('🧠 Batch VLM Cleaned JSON: $cleanContent');
+          debugPrint('Batch VLM Cleaned JSON: $cleanContent');
 
           final vlmArray = json.decode(cleanContent) as List;
 
@@ -147,11 +147,11 @@ class GPTService {
             ));
           }
 
-          debugPrint('✅ Batch VLM verification completed: ${results.length} results');
+          debugPrint('Batch VLM verification completed: ${results.length} results');
           return results;
 
         } catch (parseError) {
-          debugPrint('❌ Failed to parse batch VLM response: $parseError');
+          debugPrint('Failed to parse batch VLM response: $parseError');
           debugPrint('Raw content: $rawContent');
 
           // Fallback: return negative results for all image pairs
@@ -168,7 +168,7 @@ class GPTService {
       }
 
     } catch (e) {
-      debugPrint('❌ Batch VLM verification failed: $e');
+      debugPrint('Batch VLM verification failed: $e');
 
       // Return failed results for all image pairs
       return imagePairs.map((pair) => VLMVerificationResult(

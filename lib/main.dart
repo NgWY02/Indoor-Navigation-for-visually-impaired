@@ -80,8 +80,6 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _handleDeepLink(Uri uri) {
-    // This function handles deep links for both password recovery and email confirmation.
-  // Normalize and check for known callback paths.
   final path = uri.path.toLowerCase();
   final isCallbackPath = path == '/callback' || path == '/auth/callback' || path == '/auth';
   final isResetPath = path == '/reset' || path == '/auth/reset';
@@ -94,8 +92,6 @@ class _MyAppState extends State<MyApp> {
       final type = params['type'];
       final code = params['code'];
 
-  // Diagnostic log: print the full incoming URI and parsed pieces so we can
-  // verify that Supabase's 'state' and 'code' parameters are present.
   print('Incoming deep link: $uri');
   print('  - path: ${uri.path}');
   print('  - fragment: ${uri.fragment}');
@@ -103,9 +99,6 @@ class _MyAppState extends State<MyApp> {
   print('  - parsed params: ${params}');
   print('Handling deep link with type: $type, has access_token: ${accessToken != null}, has_code: ${code != null}');
 
-      // 1) If the link carries tokens (access/refresh) in the fragment/query, handle
-      //    according to the explicit path OR the 'type' param. Path wins: if URL was
-      //    generated with the reset redirectTo (contains /reset), prefer recovery.
       if (accessToken != null && refreshToken != null) {
         if (isResetPath || type == 'recovery') {
           print('Deep link identified as PASSWORD RECOVERY (token path or reset path).');
@@ -117,9 +110,6 @@ class _MyAppState extends State<MyApp> {
         return;
       }
 
-      // 2) If no tokens are present but a code is provided, this is typically an OAuth
-      //    or code-exchange flow. Only treat it as password recovery if the `type` param
-      //    explicitly indicates 'recovery'. Otherwise handle it as confirmation/code-exchange.
       if (code != null) {
         if (isResetPath || type == 'recovery') {
           print('Deep link identified as PASSWORD RECOVERY (code flow).');
@@ -241,7 +231,6 @@ class _MyAppState extends State<MyApp> {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      // Use AuthWrapper for proper authentication flow
       home: AuthWrapper(cameras: widget.cameras),
       routes: {
         '/profile': (context) => const ProfileScreen(),

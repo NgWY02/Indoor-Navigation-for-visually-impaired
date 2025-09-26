@@ -3,7 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import '../services/clip_service.dart';
+import '../services/dinov2_service.dart';
 import '../services/position_localization_service.dart';
 import '../services/supabase_service.dart';
 import '../models/path_models.dart';
@@ -39,17 +39,16 @@ class RealTimeNavigationService {
   double? _currentHeading;
   List<double>? _lastCapturedEmbedding;
   DateTime _lastGuidanceTime = DateTime.now();
-  DateTime? _lastVisualMatchTime; // Track when we last had a visual match
+  DateTime? _lastVisualMatchTime; 
   
   // YOLO toggle state
   bool _disableYolo = false;
   
-  // Configuration - ALL threshold constants are centralized HERE
   // To change any threshold value, modify these constants only
   static const double _waypointReachedThresholdDefault = 0.87;  // Main navigation threshold
   static const double _cleanSceneThreshold = 0.87;  // For clean-to-clean comparisons
-  static const double _peoplePresentThreshold = 0.75;  // For scenes with people
-  static const double _crowdedSceneThreshold = 0.70;  // For crowded scenes
+  static const double _peoplePresentThreshold = 0.84;  // For scenes with people 
+  static const double _crowdedSceneThreshold = 0.75;  // For crowded scenes 
   static const double _turnWaypointThreshold = 0.9;  // Higher threshold for turn waypoints (left/right/U-turn)
   static const Duration _guidanceInterval = Duration(seconds: 1);
   static const Duration _repositioningTimeout = Duration(seconds: 10);  // Dynamic threshold and audio management
@@ -119,13 +118,6 @@ class RealTimeNavigationService {
     onDebugUpdate?.call(debugInfo);
   }
 
-  /// Start navigation along the selected route
-  /// 
-  /// This will first enter an initial orientation phase where the user is guided
-  /// to face the correct direction for the first waypoint using compass readings.
-  /// Once properly oriented, actual navigation begins.
-  /// 
-  /// The orientation phase can be skipped by calling [skipOrientationAndStartNavigation].
   Future<void> startNavigation(NavigationRoute route) async {
     if (_state == NavigationState.navigating || _state == NavigationState.initialOrientation) {
       onError?.call('Navigation already in progress');
@@ -142,25 +134,20 @@ class RealTimeNavigationService {
       _lastInstructionTime = null;
       _lastVisualMatchTime = null; // Reset visual match tracking
       _currentWaypointThreshold = _waypointReachedThresholdDefault;
-      
-      // Reset all failure counters for new navigation session
       _consecutiveWaypointFailures = 0;
       _recoveryAttempts = 0;
       
-      // Clean up any leftover recovery data
+
       await _cleanupRecoveryFrames();
       
       // START WITH INITIAL ORIENTATION instead of direct navigation
       _setState(NavigationState.initialOrientation);
       
-      // Initialize step counter for this navigation session
-      // DON'T set baseline immediately - wait for first step count reading
+  
       print('🚀 Navigation started - Starting orientation phase');
       print('⏳ Waiting for compass reading to guide initial direction...');
       
       _updateDebugDisplay('🚀 NAVIGATION STARTED\n🧭 ORIENTATION PHASE\n⏳ Waiting for compass...\n🎯 Destination: ${route.endNodeName}');
-      
-      // 🐛 Send navigation start info to screen
       
       onStatusUpdate?.call('Starting navigation to ${route.endNodeName}');
       await _speak('Navigation started. Face the right direction.');
