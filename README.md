@@ -416,24 +416,3 @@ MIT License - See [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
-
-**AI Models:**
-- **DINOv2** - Meta AI (scene understanding)
-- **Stable Diffusion 2.0** - Stability AI (scene inpainting)
-- **YOLOv8** - Ultralytics (object detection)
-- **GPT-4** - OpenAI (NLU + VLM)
-
-**Frameworks:**
-- Flutter, Supabase, FastAPI, PyTorch
-
----
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/indoor-navigation-app/issues)
-- **Email**: your.email@example.com
-
----
-
-**Built with ❤️ to make indoor spaces accessible for everyone**
