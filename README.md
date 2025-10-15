@@ -107,29 +107,8 @@ The system uses advanced AI to "see" and understand indoor environments through 
 ## 🏗️ System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   Flutter Mobile App                         │
-│                                                               │
-│  Voice Command → Camera Frame → Embedding Request            │
-│       ↓              ↓              ↓                         │
-│   Porcupine      Camera API    HTTP Client                   │
-│   Speech-to-Text               ↓                             │
-│       ↓                        ↓                             │
-│   GPT-4 NLU ←──────────────────┘                             │
-│       ↓                                                       │
-│   Navigation Service ← Supabase (Embeddings DB)              │
-│       ↓                                                       │
-│   Text-to-Speech → Audio Output                              │
-└───────────────────────────────┬───────────────────────────────┘
-                                │
-                ┌───────────────▼──────────────┐
-                │  Python Vision AI Server     │
-                │                              │
-                │  DINOv2 (768-dim vectors)    │
-                │  YOLOv8 (people detection)   │
-                │  Stable Diffusion (inpaint)  │
-                │  FastAPI (HTTP endpoints)    │
-                └──────────────────────────────┘
+<img width="1021" height="755" alt="image" src="https://github.com/user-attachments/assets/06d9807a-a2d6-4ae9-bdbd-332d64169811" />
+
 ```
 
 ---
