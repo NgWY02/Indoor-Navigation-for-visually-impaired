@@ -107,7 +107,7 @@ The system uses advanced AI to "see" and understand indoor environments through 
 ## 🏗️ System Architecture
 
 ```
-![system_architecture](https://github.com/user-attachments/assets/02a336ae-8686-40ec-9ca2-07004ad10d54)
+![Image](https://github.com/user-attachments/assets/2cbfdea7-13e3-47a4-bc2f-93a4c49b31ff)
 
 ```
 
